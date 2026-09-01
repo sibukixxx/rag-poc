@@ -4,3 +4,7 @@ forgeai.yaml
 *.db
 *.db-shm
 *.db-wal
+
+# React Playground: source is tracked, node_modules is not. web/dist
+# (the built output) IS tracked — see web/embed.go for why.
+web/node_modules/

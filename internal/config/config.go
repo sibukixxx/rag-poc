@@ -16,6 +16,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Storage  StorageConfig  `yaml:"storage"`
 	Security SecurityConfig `yaml:"security"`
+	LLM      LLMConfig      `yaml:"llm"`
 }
 
 type ServerConfig struct {
@@ -38,6 +39,45 @@ type SecurityConfig struct {
 	EncryptionKeyEnv string `yaml:"encryption_key_env"`
 }
 
+// LLMConfig configures the LLM Router: named providers, business-facing
+// aliases (cheap/normal/judge) that resolve to a provider+model, and the
+// price table used to compute cost locally since providers don't return
+// it (docs/V0.1_SPEC.md §4, docs/DESIGN_REVIEW.md F-8).
+type LLMConfig struct {
+	Providers map[string]ProviderConfig `yaml:"providers"`
+	Aliases   map[string]AliasConfig    `yaml:"aliases"`
+	Pricing   map[string]PricingConfig  `yaml:"pricing"`
+	Currency  CurrencyConfig            `yaml:"currency"`
+}
+
+type ProviderConfig struct {
+	Type string `yaml:"type"` // "openai_compatible" in v0.1
+	// BaseURL is the API root, e.g. "https://api.openai.com/v1" — no
+	// trailing slash, no "/chat/completions" suffix.
+	BaseURL string `yaml:"base_url"`
+	// APIKeyEnv, if set and present in the environment, is used directly
+	// (the local-dev fast path). APIKeySecret, if set, is looked up in the
+	// encrypted secret store instead (see `forgeai secret set`). If both
+	// are set, APIKeyEnv wins when present.
+	APIKeyEnv    string `yaml:"api_key_env"`
+	APIKeySecret string `yaml:"api_key_secret"`
+}
+
+type AliasConfig struct {
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"`
+}
+
+type PricingConfig struct {
+	InputPer1M  float64 `yaml:"input_per_1m"`
+	OutputPer1M float64 `yaml:"output_per_1m"`
+}
+
+type CurrencyConfig struct {
+	Display string  `yaml:"display"`  // e.g. "USD", "JPY"
+	USDRate float64 `yaml:"usd_rate"` // multiplier from USD to Display
+}
+
 // Default returns the configuration ForgeAI uses when no config file is
 // present, so `forgeai serve` works with zero setup.
 func Default() Config {
@@ -53,6 +93,27 @@ func Default() Config {
 		},
 		Security: SecurityConfig{
 			EncryptionKeyEnv: "FORGEAI_MASTER_KEY",
+		},
+		LLM: LLMConfig{
+			Providers: map[string]ProviderConfig{
+				"default": {
+					Type:      "openai_compatible",
+					BaseURL:   "https://api.openai.com/v1",
+					APIKeyEnv: "FORGEAI_OPENAI_API_KEY",
+				},
+			},
+			Aliases: map[string]AliasConfig{
+				"cheap":  {Provider: "default", Model: "gpt-4o-mini"},
+				"normal": {Provider: "default", Model: "gpt-4o-mini"},
+				"judge":  {Provider: "default", Model: "gpt-4o-mini"},
+			},
+			Pricing: map[string]PricingConfig{
+				"gpt-4o-mini": {InputPer1M: 0.15, OutputPer1M: 0.60},
+			},
+			Currency: CurrencyConfig{
+				Display: "USD",
+				USDRate: 1.0,
+			},
 		},
 	}
 }

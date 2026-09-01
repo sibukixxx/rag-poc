@@ -18,7 +18,7 @@ func TestOpenAppliesMigrationsAndIsIdempotent(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"projects", "settings", "secrets", "schema_migrations"} {
+	for _, table := range []string{"projects", "settings", "secrets", "traces", "spans", "schema_migrations"} {
 		var name string
 		err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
 		if err != nil {
@@ -26,17 +26,25 @@ func TestOpenAppliesMigrationsAndIsIdempotent(t *testing.T) {
 		}
 	}
 
+	var countBefore int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&countBefore); err != nil {
+		t.Fatalf("counting schema_migrations: %v", err)
+	}
+	if countBefore == 0 {
+		t.Fatal("expected at least one recorded migration")
+	}
+
 	// Re-running migrations against the same DB must be a no-op, not an error.
 	if err := sqlite.Migrate(db); err != nil {
 		t.Fatalf("second Migrate call should be idempotent, got: %v", err)
 	}
 
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&count); err != nil {
+	var countAfter int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&countAfter); err != nil {
 		t.Fatalf("counting schema_migrations: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("expected exactly 1 recorded migration, got %d", count)
+	if countAfter != countBefore {
+		t.Errorf("expected migration count to stay at %d after a second Migrate call, got %d", countBefore, countAfter)
 	}
 }
 

@@ -5,9 +5,13 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/app"
@@ -26,6 +30,8 @@ func main() {
 		cmdDoctor(os.Args[2:])
 	case "init":
 		cmdInit(os.Args[2:])
+	case "secret":
+		cmdSecret(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -42,6 +48,11 @@ Usage:
   forgeai serve  [-config path]   Start the server (default port 8080)
   forgeai doctor [-config path]   Check environment and configuration
   forgeai init   [-config path]   Generate a master key and starter config
+  forgeai secret [-config path] set <name> [value]
+                                   Store an encrypted secret (e.g. an API key).
+                                   Omit value to read it from stdin.
+  forgeai secret [-config path] delete <name>
+                                   Remove a stored secret.
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`)
@@ -128,4 +139,76 @@ security:
 	fmt.Println("Then start the server:")
 	fmt.Println()
 	fmt.Printf("  forgeai serve -config %s\n", *configPath)
+}
+
+func cmdSecret(args []string) {
+	// flag.Parse stops at the first non-flag argument, so -config must
+	// come before the subcommand: `forgeai secret -config path set name`.
+	fs := flag.NewFlagSet("secret", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	fs.Parse(args)
+	rest := fs.Args()
+
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "forgeai secret: expected a subcommand (set, delete)")
+		os.Exit(1)
+	}
+	sub := rest[0]
+	rest = rest[1:]
+
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "forgeai secret: expected a secret name")
+		os.Exit(1)
+	}
+	name := rest[0]
+
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+
+	secrets, err := a.Secrets()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch sub {
+	case "set":
+		var value string
+		if len(rest) >= 2 {
+			value = strings.Join(rest[1:], " ")
+		} else {
+			fmt.Fprintln(os.Stderr, "Enter secret value (input hidden only in an interactive TTY):")
+			reader := bufio.NewReader(os.Stdin)
+			line, err := reader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				fmt.Fprintf(os.Stderr, "forgeai: reading value: %v\n", err)
+				os.Exit(1)
+			}
+			value = strings.TrimRight(line, "\r\n")
+		}
+		if value == "" {
+			fmt.Fprintln(os.Stderr, "forgeai: secret value must not be empty")
+			os.Exit(1)
+		}
+		if err := secrets.Set(context.Background(), name, []byte(value)); err != nil {
+			fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("forgeai: stored secret %q\n", name)
+
+	case "delete":
+		if err := secrets.Delete(context.Background(), name); err != nil {
+			fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("forgeai: deleted secret %q\n", name)
+
+	default:
+		fmt.Fprintf(os.Stderr, "forgeai secret: unknown subcommand %q\n", sub)
+		os.Exit(1)
+	}
 }

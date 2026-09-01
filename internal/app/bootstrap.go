@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/config"
+	"github.com/sibukixxx/rag-poc/internal/domain/secret"
 )
 
 // Version is set at build time via -ldflags; "dev" is used for local builds.
@@ -39,6 +41,19 @@ func Bootstrap(configPath string) (*App, error) {
 	}
 
 	return &App{Config: cfg, DB: db}, nil
+}
+
+// Secrets builds a SecretStore backed by the master key. It returns an
+// error if the master key environment variable isn't set — callers that
+// can tolerate a missing key (e.g. BuildRouter, which falls back to
+// APIKeyEnv) should treat that as "no secret store available", not a
+// fatal condition.
+func (a *App) Secrets() (secret.Store, error) {
+	box, err := crypto.NewSecretBox(a.Config.Security.EncryptionKeyEnv)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.NewSecretStore(a.DB, box), nil
 }
 
 func (a *App) Close() error {

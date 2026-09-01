@@ -1,0 +1,41 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --user-bg: #2563eb;
+  --assistant-bg: #f3f4f6;
+  --error-bg: #fee2e2;
+  --error-fg: #991b1b;
+  --accent: #2563eb;
+}
+
+.bubble.user {
+  color: white;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0f10;
+    --fg: #e5e5e5;
+    --muted: #9ca3af;
+    --border: #27272a;
+    --user-bg: #2563eb;
+    --assistant-bg: #1f1f22;
+    --error-bg: #3f1d1d;
+    --error-fg: #fca5a5;
+    --accent: #3b82f6;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}

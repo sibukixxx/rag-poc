@@ -10,15 +10,28 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	forgehttp "github.com/sibukixxx/rag-poc/internal/http"
+	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
 // Serve starts the HTTP server and blocks until it receives SIGINT/SIGTERM,
 // then shuts down gracefully.
 func (a *App) Serve() error {
+	// Secrets are optional at boot: a fresh install with no master key set
+	// still serves fine as long as providers resolve their key via
+	// api_key_env (the default). BuildRouter tolerates a nil store.
+	secrets, _ := a.Secrets()
+
+	router := BuildRouter(a.Config.LLM, secrets)
+	prices := BuildPriceTable(a.Config.LLM)
+	traces := sqlite.NewTraceStore(a.DB)
+	chat := usecase.NewChatUseCase(router, prices, traces)
+
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:      a.DB,
 		Version: Version,
+		Chat:    chat,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

@@ -18,12 +18,15 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
 - **完了条件**: `go build` 一発のバイナリで serve / doctor が動く → 確認済み
   （`forgeai init` → `forgeai doctor` → `forgeai serve` → `/api/v1/health` が 200 を返す）
 
-### W2: LLM アダプタ + Playground
-- OpenAI-compatible アダプタ（Generate / Stream、**Usage 必須取得**）
-- LLM Router（alias 解決）、単価テーブル → コスト計算
-- **Trace / Span の最小実装をここで入れる**（F-2。全 LLM 呼び出しが span を残す）
-- React shell（Vite）+ go:embed、Chat Playground（SSE）
-- **完了条件**: Playground でチャットでき、Trace にトークン数とコストが残る
+### W2: LLM アダプタ + Playground ✅ 完了
+- OpenAI-compatible アダプタ（Generate / Stream、**Usage 必須取得**）+ モックサーバでの単体テスト
+- LLM Router（alias 解決）、単価テーブル → コスト計算（`forgeai secret set/delete` で暗号化キー管理も追加）
+- **Trace / Span の最小実装をここで導入**（F-2。全 LLM 呼び出しが span を残す。`traces`/`spans` テーブル追加）
+- React shell（Vite）+ go:embed（`web/dist` をリポジトリに commit し、Node 無しでも `go build` が通る）、Chat Playground（SSE、alias 切替、token/cost/trace 表示）
+- `forgeai doctor` に LLM alias ごとの provider/model/APIキー解決チェックを追加
+- **完了条件**: Playground でチャットでき、Trace にトークン数とコストが残る → 確認済み
+  （モック OpenAI 互換サーバに対し `forgeai serve` → ブラウザ(Playwright)で実際にメッセージ送信 →
+  ストリーミング応答 + `12→4 tok · $0.000004 · trace ...` の表示を確認。単体テストも全緑）
 
 ### W3: Ingestion
 - Loader interface + TXT / MD / HTML / CSV / JSON、ベストエフォート PDF
