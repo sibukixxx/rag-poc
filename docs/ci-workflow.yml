@@ -1,0 +1,54 @@
+# This file could not be pushed to .github/workflows/ci.yml directly:
+# the GitHub App token used by this session lacks the `workflows`
+# permission required to create/update Actions workflow files.
+#
+# To enable CI, a maintainer with push access should copy this file to
+# .github/workflows/ci.yml and commit it normally.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build (linux/amd64)
+        run: go build -o dist/forgeai ./cmd/forgeai
+
+      - name: Build (linux/arm64)
+        run: GOOS=linux GOARCH=arm64 go build -o dist/forgeai-linux-arm64 ./cmd/forgeai
+
+      - name: Build (darwin/arm64)
+        run: GOOS=darwin GOARCH=arm64 go build -o dist/forgeai-darwin-arm64 ./cmd/forgeai
+
+      - name: Build (windows/amd64)
+        run: GOOS=windows GOARCH=amd64 go build -o dist/forgeai-windows-amd64.exe ./cmd/forgeai
+
+      - name: Smoke test (doctor + serve)
+        run: |
+          set -e
+          export FORGEAI_MASTER_KEY=$(dist/forgeai init -config /tmp/ci-forgeai.yaml | sed -n 's/^.*MASTER_KEY=//p')
+          dist/forgeai doctor -config /tmp/ci-forgeai.yaml
+          dist/forgeai serve -config /tmp/ci-forgeai.yaml &
+          SERVER_PID=$!
+          sleep 1
+          curl -sf localhost:8080/api/v1/health
+          kill $SERVER_PID

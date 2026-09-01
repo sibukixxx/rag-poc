@@ -11,7 +11,10 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
 - Go モジュール初期化、`cmd/forgeai`、config 読み込み（YAML + env）
 - modernc SQLite + migrations（embed）、`projects` / `settings` / `secrets`（AES-GCM）
 - chi ルータ、`/api/v1/health`、`forgeai doctor`（DB / filesystem チェック）
-- CI（vet + test + CGO_ENABLED=0 での4ターゲットビルド + smoke test）
+- CI（vet + test + CGO_ENABLED=0 での4ターゲットビルド + smoke test）を
+  `docs/ci-workflow.yml` に用意（このセッションのトークンには GitHub Actions
+  workflow ファイルへの push 権限がないため、`.github/workflows/ci.yml` への
+  設置はリポジトリ管理者が手動で行うこと）
 - **完了条件**: `go build` 一発のバイナリで serve / doctor が動く → 確認済み
   （`forgeai init` → `forgeai doctor` → `forgeai serve` → `/api/v1/health` が 200 を返す）
 
