@@ -11,6 +11,16 @@ Before/After 比較 → Runtime API デプロイまでを提供する（v0.1 ス
 - [docs/V0.1_SPEC.md](docs/V0.1_SPEC.md) — v0.1 確定仕様（スコープ / interface / スキーマ / API / 受け入れテスト）
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 週次ロードマップ（v0.1 = 12週）
 
+## Getting Started (W1)
+
+```sh
+make build
+./dist/forgeai init            # generates forgeai.yaml + a master key
+export FORGEAI_MASTER_KEY=...  # printed by init
+./dist/forgeai doctor          # checks config / filesystem / db / master key
+./dist/forgeai serve           # http://localhost:8080/api/v1/health
+```
+
 ## v0.1 完成条件（要約）
 
 ```

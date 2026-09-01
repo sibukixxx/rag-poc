@@ -7,12 +7,13 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
 
 ## v0.1（W1–W12）: 評価可能な RAG 実行基盤
 
-### W1: 骨格
+### W1: 骨格 ✅ 完了
 - Go モジュール初期化、`cmd/forgeai`、config 読み込み（YAML + env）
 - modernc SQLite + migrations（embed）、`projects` / `settings` / `secrets`（AES-GCM）
 - chi ルータ、`/api/v1/health`、`forgeai doctor`（DB / filesystem チェック）
-- CI（lint + test + CGO_ENABLED=0 ビルド）
-- **完了条件**: `go build` 一発のバイナリで serve / doctor が動く
+- CI（vet + test + CGO_ENABLED=0 での4ターゲットビルド + smoke test）
+- **完了条件**: `go build` 一発のバイナリで serve / doctor が動く → 確認済み
+  （`forgeai init` → `forgeai doctor` → `forgeai serve` → `/api/v1/health` が 200 を返す）
 
 ### W2: LLM アダプタ + Playground
 - OpenAI-compatible アダプタ（Generate / Stream、**Usage 必須取得**）

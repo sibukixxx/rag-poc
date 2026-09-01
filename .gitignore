@@ -1,0 +1,6 @@
+/dist/
+/data/
+forgeai.yaml
+*.db
+*.db-shm
+*.db-wal
