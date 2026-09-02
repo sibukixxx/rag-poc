@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/extractor"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
+	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
 	forgehttp "github.com/sibukixxx/rag-poc/internal/http"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -20,7 +22,8 @@ import (
 func (a *App) Serve() error {
 	// Secrets are optional at boot: a fresh install with no master key set
 	// still serves fine as long as providers resolve their key via
-	// api_key_env (the default). BuildRouter tolerates a nil store.
+	// api_key_env (the default). BuildRouter/BuildEmbedder tolerate a nil
+	// store.
 	secrets, _ := a.Secrets()
 
 	router := BuildRouter(a.Config.LLM, secrets)
@@ -28,10 +31,20 @@ func (a *App) Serve() error {
 	traces := sqlite.NewTraceStore(a.DB)
 	chat := usecase.NewChatUseCase(router, prices, traces)
 
+	tok, err := tokenizer.New()
+	if err != nil {
+		return fmt.Errorf("loading tokenizer: %w", err)
+	}
+	knowledgeStore := sqlite.NewKnowledgeStore(a.DB)
+	embedder := BuildEmbedder(a.Config.Embedding, secrets)
+	ingest := usecase.NewIngestUseCase(knowledgeStore, extractor.NewDefaultRegistry(), tok, embedder, prices, traces)
+
 	handler := forgehttp.NewRouter(forgehttp.Deps{
-		DB:      a.DB,
-		Version: Version,
-		Chat:    chat,
+		DB:        a.DB,
+		Version:   Version,
+		Chat:      chat,
+		Knowledge: knowledgeStore,
+		Ingest:    ingest,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

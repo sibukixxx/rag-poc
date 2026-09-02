@@ -70,8 +70,23 @@ func Doctor(configPath string) []CheckStatus {
 	}
 
 	checks = append(checks, llmProviderChecks(cfg, secrets)...)
+	checks = append(checks, embeddingCheck(cfg, secrets))
 
 	return checks
+}
+
+func embeddingCheck(cfg config.Config, secrets secret.Store) CheckStatus {
+	if HasAPIKey(cfg.Embedding.Provider, secrets) {
+		return CheckStatus{
+			Name: "Embedding model", OK: true,
+			Info: fmt.Sprintf("%s (%d dims, key resolved)", cfg.Embedding.Model, cfg.Embedding.Dimensions),
+		}
+	}
+	return CheckStatus{
+		Name: "Embedding model", OK: false,
+		Info: fmt.Sprintf("%s: no API key (set %s or `forgeai secret set %s`)",
+			cfg.Embedding.Model, cfg.Embedding.Provider.APIKeyEnv, cfg.Embedding.Provider.APIKeySecret),
+	}
 }
 
 // llmProviderChecks reports, per configured alias, whether it resolves to

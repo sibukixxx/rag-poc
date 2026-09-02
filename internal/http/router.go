@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
 	"github.com/sibukixxx/rag-poc/internal/http/handler"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -18,9 +19,11 @@ import (
 // added (W2+); keeping it as a struct avoids reshuffling NewRouter's
 // signature every week.
 type Deps struct {
-	DB      *sql.DB
-	Version string
-	Chat    *usecase.ChatUseCase
+	DB        *sql.DB
+	Version   string
+	Chat      *usecase.ChatUseCase
+	Knowledge knowledge.Store
+	Ingest    *usecase.IngestUseCase
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -33,10 +36,15 @@ func NewRouter(deps Deps) http.Handler {
 
 	health := handler.NewHealthHandler(deps.DB, deps.Version)
 	chat := handler.NewChatHandler(deps.Chat)
+	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", health.Check)
 		r.Post("/chat", chat.Stream)
+		r.Post("/knowledge-bases", kb.CreateKnowledgeBase)
+		r.Get("/knowledge-bases", kb.ListKnowledgeBases)
+		r.Post("/knowledge-bases/{id}/documents", kb.UploadDocument)
+		r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
 	})
 
 	r.Handle("/*", staticHandler())

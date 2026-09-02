@@ -55,6 +55,15 @@ func HasAPIKey(p config.ProviderConfig, secrets secret.Store) bool {
 	return resolveAPIKey(p, secrets) != ""
 }
 
+// BuildEmbedder wires the single configured embedding model. Like
+// BuildRouter, a missing API key doesn't prevent construction — it
+// surfaces as an API error on first use and as a FAIL row in `forgeai
+// doctor`.
+func BuildEmbedder(cfg config.EmbeddingConfig, secrets secret.Store) llm.Embedder {
+	apiKey := resolveAPIKey(cfg.Provider, secrets)
+	return openaicompat.NewEmbedder(cfg.Provider.BaseURL, apiKey, cfg.Model, cfg.Dimensions)
+}
+
 func BuildPriceTable(cfg config.LLMConfig) llm.PriceTable {
 	prices := make(map[string]llm.ModelPricing, len(cfg.Pricing))
 	for model, p := range cfg.Pricing {

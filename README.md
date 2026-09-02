@@ -11,22 +11,29 @@ Before/After 比較 → Runtime API デプロイまでを提供する（v0.1 ス
 - [docs/V0.1_SPEC.md](docs/V0.1_SPEC.md) — v0.1 確定仕様（スコープ / interface / スキーマ / API / 受け入れテスト）
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 週次ロードマップ（v0.1 = 12週）
 
-## Getting Started (W1-W2)
+## Getting Started (W1-W3)
 
 ```sh
 make build
 ./dist/forgeai init                        # generates forgeai.yaml + a master key
 export FORGEAI_MASTER_KEY=...              # printed by init
 export FORGEAI_OPENAI_API_KEY=sk-...       # or: forgeai secret set openai <key>
-./dist/forgeai doctor                      # checks config / db / master key / LLM aliases
+./dist/forgeai doctor                      # checks config / db / master key / LLM aliases / embedding model
 ./dist/forgeai serve                       # http://localhost:8080
 ```
 
-Open http://localhost:8080 for the Chat Playground (pick an alias — cheap /
-normal / judge — and chat; each reply shows tokens and cost). Every call is
-recorded as a Trace+Span in SQLite. The React source lives in `web/`; run
-`npm run build` there after UI changes (the built `web/dist` is committed so
-`go build` alone still works without Node installed).
+Open http://localhost:8080 for two tabs:
+
+- **Chat** — pick an alias (cheap / normal / judge) and chat; each reply
+  shows tokens and cost. Every call is recorded as a Trace+Span in SQLite.
+- **Knowledge** — create a knowledge base and upload a PDF/TXT/MD/HTML/CSV/JSON
+  file. It's loaded, NFKC-normalized, chunked (token-based, tiktoken), hashed,
+  and embedded — re-uploading identical content reuses the existing embedding
+  instead of re-calling the API.
+
+The React source lives in `web/`; run `npm run build` there after UI changes
+(the built `web/dist` is committed so `go build` alone still works without
+Node installed).
 
 ## v0.1 完成条件（要約）
 

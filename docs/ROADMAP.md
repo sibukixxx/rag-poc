@@ -28,12 +28,24 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   （モック OpenAI 互換サーバに対し `forgeai serve` → ブラウザ(Playwright)で実際にメッセージ送信 →
   ストリーミング応答 + `12→4 tok · $0.000004 · trace ...` の表示を確認。単体テストも全緑）
 
-### W3: Ingestion
-- Loader interface + TXT / MD / HTML / CSV / JSON、ベストエフォート PDF
-- 外部コンバータ差し込み口（HTTP converter、未設定なら内蔵 loader）
-- 正規化（NFKC）→ Chunker（トークン数ベース, tiktoken-go）→ Hash 付与
-- Embedding パイプライン（hash 一致でスキップ）、documents API + UI（一覧 / 状態）
-- **完了条件**: PDF/MD を投げて chunks + embeddings が入る。再投入で再生成されない
+### W3: Ingestion ✅ 完了
+- Loader interface + TXT / MD / HTML / CSV / JSON、ベストエフォート PDF（`internal/adapter/extractor`）
+  - CSV/JSON は「1行/1要素 = 1 Page」で取り込み、行単位の検索粒度を確保
+  - PDF は `ledongthuc/pdf`（純Go）。実PDF（fpdf2生成の2ページファイル）でテスト済み
+  - 外部コンバータ差し込み口は `knowledge.Loader` interface が担う（`Registry.Register`）。実際の
+    HTTPコンバータ実装自体は先送り（インターフェースの拡張点のみ用意）
+- 正規化（NFKC, `golang.org/x/text`）→ Chunker（トークン数ベース, tiktoken-go + オフラインBPEローダーで
+  ネットワーク接続なしに動作することを確認済み）→ Hash 付与（`internal/adapter/tokenizer`）
+- Embedding パイプライン（`internal/usecase/ingest.go`）: chunk hash + embedding model 名で
+  既存embeddingを検索し、一致すればAPI呼び出しをスキップ。ingest系呼び出しもTraceに記録
+- `knowledge_bases` / `documents` / `chunks` / `embeddings` テーブル（migration 0003）
+- API: `POST/GET /api/v1/knowledge-bases`, `POST/GET /api/v1/knowledge-bases/:id/documents`
+  （アップロードは同期処理。W3ではジョブキューを導入しない）
+- UI: Knowledge タブ（KB作成/選択、ファイルアップロード、ドキュメント一覧+ステータス）
+- **完了条件**: PDF/MD を投げて chunks + embeddings が入る。再投入で再生成されない → 確認済み
+  （モックサーバでMD+実PDFをアップロード→chunks/embeddings生成→同一MDを再アップロード→
+  embeddings API呼び出しが増えないことをサーバログで確認。ブラウザ(Playwright)でもUI経由の
+  アップロードとステータス表示を確認。単体テスト全緑、うちハッシュスキップの回帰テストを含む）
 
 ### W4: Hybrid Search
 - vecmem（ブルートフォース cosine）+ FTS5 **trigram**（F-4）

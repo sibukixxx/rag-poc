@@ -12,11 +12,12 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Storage  StorageConfig  `yaml:"storage"`
-	Security SecurityConfig `yaml:"security"`
-	LLM      LLMConfig      `yaml:"llm"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Storage   StorageConfig   `yaml:"storage"`
+	Security  SecurityConfig  `yaml:"security"`
+	LLM       LLMConfig       `yaml:"llm"`
+	Embedding EmbeddingConfig `yaml:"embedding"`
 }
 
 type ServerConfig struct {
@@ -78,6 +79,16 @@ type CurrencyConfig struct {
 	USDRate float64 `yaml:"usd_rate"` // multiplier from USD to Display
 }
 
+// EmbeddingConfig configures the single embedding model used to vectorize
+// ingested chunks (docs/V0.1_SPEC.md §3). Unlike LLM, there's no
+// alias/router layer — swapping embedding models requires re-ingesting,
+// so v0.1 keeps it to one configured model.
+type EmbeddingConfig struct {
+	Provider   ProviderConfig `yaml:"provider"`
+	Model      string         `yaml:"model"`
+	Dimensions int            `yaml:"dimensions"`
+}
+
 // Default returns the configuration ForgeAI uses when no config file is
 // present, so `forgeai serve` works with zero setup.
 func Default() Config {
@@ -108,12 +119,22 @@ func Default() Config {
 				"judge":  {Provider: "default", Model: "gpt-4o-mini"},
 			},
 			Pricing: map[string]PricingConfig{
-				"gpt-4o-mini": {InputPer1M: 0.15, OutputPer1M: 0.60},
+				"gpt-4o-mini":            {InputPer1M: 0.15, OutputPer1M: 0.60},
+				"text-embedding-3-small": {InputPer1M: 0.02, OutputPer1M: 0},
 			},
 			Currency: CurrencyConfig{
 				Display: "USD",
 				USDRate: 1.0,
 			},
+		},
+		Embedding: EmbeddingConfig{
+			Provider: ProviderConfig{
+				Type:      "openai_compatible",
+				BaseURL:   "https://api.openai.com/v1",
+				APIKeyEnv: "FORGEAI_OPENAI_API_KEY",
+			},
+			Model:      "text-embedding-3-small",
+			Dimensions: 1536,
 		},
 	}
 }
