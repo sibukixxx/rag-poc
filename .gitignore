@@ -8,3 +8,6 @@ forgeai.yaml
 # React Playground: source is tracked, node_modules is not. web/dist
 # (the built output) IS tracked — see web/embed.go for why.
 web/node_modules/
+
+# docker compose 用の環境変数
+.env
