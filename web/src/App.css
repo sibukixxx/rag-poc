@@ -319,3 +319,37 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.citations {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.citation-chip {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.citation-chip:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.citation-text {
+  margin: 0 0 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

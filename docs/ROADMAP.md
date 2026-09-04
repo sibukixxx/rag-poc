@@ -75,11 +75,27 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   結果が返ることを確認。ブラウザ(Playwright)でもSearchサブタブの実行と結果表示を確認、
   既存のChat/Documentsタブの回帰も無し。単体テスト全緑）
 
-### W5: RAG チャット
-- Context Builder（トークン予算内で chunk 詰め）→ Prompt → LLM → 引用付き回答
-- LLM rerank（任意、デフォルト off）
-- Playground を KB 接続チャットに拡張（引用リンク → chunk 表示）
-- **完了条件**: 「返品規定について教えて」に引用付きで答える
+### W5: RAG チャット ✅ 完了
+- `internal/usecase/rag_context.go`: Context Builder。SearchUseCase の結果を
+  `[1]`, `[2]`... と採番し、トークン予算（既定2000）に収まる範囲で詰める。
+  ランク最上位のチャンクは予算を超えても必ず1件は含める（0件で答えるよりまし）
+- `internal/usecase/rag_chat.go`: `RAGChatUseCase.ChatStream` — Search → Context Builder →
+  system prompt（「番号付き引用元のみに基づき、`[n]`で逐次引用して回答せよ」）→ LLM Stream。
+  ChatUseCase と同様に Trace/Span を記録
+- LLM rerank は W4 で実装済みの `retrieval.Options.Rerank` をそのまま渡す形で対応
+  （既定 off、リクエストで `rerank: true` にすると有効）
+- API: `POST /api/v1/knowledge-bases/:id/chat`（SSE。`{alias, query, rerank}` →
+  delta イベント + 最終 `{done, usage, cost_usd, citations, no_context}` イベント）
+- UI: Chat タブに KB セレクタを追加。KB 未選択時は従来通りの複数ターンチャット、
+  KB 選択時はその質問単体で RAG 検索し直す1問1答モードに切り替わる。回答の下に
+  引用チップ（`[1] filename.md p.2`）を表示し、クリックで該当チャンク本文を展開表示
+- **完了条件**: 「返品規定について教えて」に引用付きで答える → 確認済み
+  （モックサーバに返品ポリシー文書をingestし、RAGチャットAPIへ日本語で質問→
+  「返品は商品到着後30日以内であれば可能です [1]。」という引用付き回答と、
+  filename/text入りのcitationsが返ることをcurlで確認。空のKBに対する質問では
+  `no_context:true`が正しく返ることも確認。ブラウザ(Playwright)でもKB選択→
+  質問→引用チップ表示→クリックで本文展開、を実演。既存の平文チャット/
+  Documents/Searchタブの回帰も無し。単体テスト全緑）
 
 ### W6: Prompt Registry + Trace UI
 - prompts / prompt_versions CRUD + UI（バージョン一覧・diff）

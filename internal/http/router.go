@@ -25,6 +25,7 @@ type Deps struct {
 	Knowledge knowledge.Store
 	Ingest    *usecase.IngestUseCase
 	Search    *usecase.SearchUseCase
+	RAGChat   *usecase.RAGChatUseCase
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -37,7 +38,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	health := handler.NewHealthHandler(deps.DB, deps.Version)
 	chat := handler.NewChatHandler(deps.Chat)
-	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search)
+	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search, deps.RAGChat)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", health.Check)
@@ -47,6 +48,7 @@ func NewRouter(deps Deps) http.Handler {
 		r.Post("/knowledge-bases/{id}/documents", kb.UploadDocument)
 		r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
 		r.Post("/knowledge-bases/{id}/search", kb.Search)
+		r.Post("/knowledge-bases/{id}/chat", kb.Chat)
 	})
 
 	r.Handle("/*", staticHandler())

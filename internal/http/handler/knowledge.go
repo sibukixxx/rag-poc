@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -15,13 +16,14 @@ import (
 )
 
 type KnowledgeHandler struct {
-	store  knowledge.Store
-	ingest *usecase.IngestUseCase
-	search *usecase.SearchUseCase
+	store   knowledge.Store
+	ingest  *usecase.IngestUseCase
+	search  *usecase.SearchUseCase
+	ragChat *usecase.RAGChatUseCase
 }
 
-func NewKnowledgeHandler(store knowledge.Store, ingest *usecase.IngestUseCase, search *usecase.SearchUseCase) *KnowledgeHandler {
-	return &KnowledgeHandler{store: store, ingest: ingest, search: search}
+func NewKnowledgeHandler(store knowledge.Store, ingest *usecase.IngestUseCase, search *usecase.SearchUseCase, ragChat *usecase.RAGChatUseCase) *KnowledgeHandler {
+	return &KnowledgeHandler{store: store, ingest: ingest, search: search, ragChat: ragChat}
 }
 
 type knowledgeBaseDTO struct {
@@ -197,4 +199,98 @@ func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
+}
+
+type citationDTO struct {
+	Index      int    `json:"index"`
+	ChunkID    string `json:"chunk_id"`
+	DocumentID string `json:"document_id"`
+	Filename   string `json:"filename"`
+	Page       *int   `json:"page,omitempty"`
+	Heading    string `json:"heading,omitempty"`
+	Text       string `json:"text"`
+}
+
+type ragChatStreamEventDTO struct {
+	Delta     string        `json:"delta,omitempty"`
+	Done      bool          `json:"done,omitempty"`
+	TraceID   string        `json:"trace_id,omitempty"`
+	Usage     *usageDTO     `json:"usage,omitempty"`
+	CostUSD   float64       `json:"cost_usd,omitempty"`
+	Citations []citationDTO `json:"citations,omitempty"`
+	NoContext bool          `json:"no_context,omitempty"`
+	Error     string        `json:"error,omitempty"`
+}
+
+// Chat handles POST /api/v1/knowledge-bases/{id}/chat (SSE): retrieves
+// context from the knowledge base and streams an answer that cites it
+// (docs/ROADMAP.md W5). Unlike /api/v1/chat, this takes a single query,
+// not a message history — each question is answered independently by
+// retrieving fresh context for it.
+func (h *KnowledgeHandler) Chat(w http.ResponseWriter, r *http.Request) {
+	kbID := chi.URLParam(r, "id")
+
+	var req struct {
+		Alias  string `json:"alias"`
+		Query  string `json:"query"`
+		Rerank bool   `json:"rerank"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if req.Alias == "" {
+		req.Alias = "normal"
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		http.Error(w, "query must not be empty", http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.ragChat.ChatStream(r.Context(), kbID, req.Alias, req.Query, req.Rerank)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	write := func(ev ragChatStreamEventDTO) {
+		payload, _ := json.Marshal(ev)
+		fmt.Fprintf(w, "data: %s\n\n", payload)
+		flusher.Flush()
+	}
+
+	for ev := range result.Events {
+		switch {
+		case ev.Err != nil:
+			write(ragChatStreamEventDTO{Error: ev.Err.Error(), TraceID: result.TraceID})
+		case ev.Done:
+			citations := make([]citationDTO, len(ev.Citations))
+			for i, c := range ev.Citations {
+				citations[i] = citationDTO{
+					Index: c.Index, ChunkID: c.ChunkID, DocumentID: c.DocumentID,
+					Filename: c.Filename, Page: c.Page, Heading: c.Heading, Text: c.Text,
+				}
+			}
+			write(ragChatStreamEventDTO{
+				Done: true, TraceID: result.TraceID,
+				Usage:     &usageDTO{InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens},
+				CostUSD:   ev.CostUSD,
+				Citations: citations,
+				NoContext: ev.NoContext,
+			})
+		default:
+			write(ragChatStreamEventDTO{Delta: ev.Delta})
+		}
+	}
 }

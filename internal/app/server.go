@@ -49,6 +49,8 @@ func (a *App) Serve() error {
 	reranker := llmrerank.New(router, "cheap")
 	search := usecase.NewSearchUseCase(vectorSearcher, keywordSearcher, embedder, reranker, traces)
 
+	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok)
+
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
 		Version:   Version,
@@ -56,6 +58,7 @@ func (a *App) Serve() error {
 		Knowledge: knowledgeStore,
 		Ingest:    ingest,
 		Search:    search,
+		RAGChat:   ragChat,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
