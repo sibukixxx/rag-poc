@@ -8,7 +8,7 @@ Self-hosted RAG / AI-app platform shipped as one Go binary (`forgeai`). Spec: `d
 make build                       # CGO_ENABLED=0 go build -o dist/forgeai ./cmd/forgeai
 make test | make vet             # go test ./... (CGO off)
 go test ./internal/usecase -run TestName
-./dist/forgeai init | doctor | serve | secret set <name>   # -config path is optional
+./dist/forgeai init | doctor | serve | secret set <name>   # -config path optional; secret value comes from stdin, never argv
 cd web && npm install && npm run dev     # UI dev; proxies /api → :8080
 cd web && npm run build                  # writes web/dist — COMMIT it (go:embed)
 docker compose up -d --build             # self-host + Cloudflare Tunnel, see docs/deploy-cloudflare.md
@@ -36,5 +36,7 @@ adapter/ implements domain interfaces: openaicompat (LLM+Embedder), sqlite (repo
 ## Conventions
 
 - HTTP surface: management API under `/api/v1`, runtime API `/runtime/v1` (later weeks); everything else serves the embedded SPA.
-- No app-level auth yet — public deployments must sit behind Cloudflare Access.
+- No app-level auth yet — public deployments must sit behind Cloudflare Access. `router.go` adds the compensating controls: body caps (1 MiB JSON / 32 MiB upload), `Sec-Fetch-Site` CSRF guard, throttle, CSP/frame headers, CF-Connecting-IP only. Keep new routes inside `r.Route("/api/v1")` so they inherit them.
+- Untrusted input hardening: loaders run under `loadWithGuard` (30 s timeout + panic recovery); PDF pages are capped; HTML walk is iterative. Upstream provider errors are logged, never returned to clients (`readAPIError`).
+- Secrets: `SecretBox.Seal/Open` take the secret name as AAD; changing a name invalidates its ciphertext.
 - `.github/workflows` cannot be pushed from Claude sessions; CI template lives in `docs/ci-workflow.yml`.

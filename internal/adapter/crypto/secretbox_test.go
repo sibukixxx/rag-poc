@@ -26,7 +26,7 @@ func TestSecretBoxRoundTrip(t *testing.T) {
 	}
 
 	plaintext := []byte("sk-super-secret-api-key")
-	ciphertext, nonce, err := box.Seal(plaintext)
+	ciphertext, nonce, err := box.Seal(plaintext, []byte("openai"))
 	if err != nil {
 		t.Fatalf("Seal: %v", err)
 	}
@@ -34,12 +34,17 @@ func TestSecretBoxRoundTrip(t *testing.T) {
 		t.Fatalf("ciphertext must not equal plaintext")
 	}
 
-	got, err := box.Open(ciphertext, nonce)
+	got, err := box.Open(ciphertext, nonce, []byte("openai"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	if string(got) != string(plaintext) {
 		t.Fatalf("got %q, want %q", got, plaintext)
+	}
+
+	// A ciphertext moved to a different secret name must not decrypt.
+	if _, err := box.Open(ciphertext, nonce, []byte("anthropic")); err == nil {
+		t.Fatalf("Open with a different AAD must fail")
 	}
 }
 

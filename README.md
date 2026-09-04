@@ -18,7 +18,7 @@ Before/After 比較 → Runtime API デプロイまでを提供する（v0.1 ス
 make build
 ./dist/forgeai init                        # generates forgeai.yaml + a master key
 export FORGEAI_MASTER_KEY=...              # printed by init
-export FORGEAI_OPENAI_API_KEY=sk-...       # or: forgeai secret set openai <key>
+export FORGEAI_OPENAI_API_KEY=sk-...       # or: echo "$KEY" | ./dist/forgeai secret set openai
 ./dist/forgeai doctor                      # checks config / db / master key / LLM aliases / embedding model
 ./dist/forgeai serve                       # http://localhost:8080
 ```

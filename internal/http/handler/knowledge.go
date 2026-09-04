@@ -2,7 +2,9 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -51,6 +53,21 @@ func toDocumentDTO(d knowledge.Document) documentDTO {
 
 var slugSanitizer = regexp.MustCompile(`[^a-z0-9]+`)
 
+const (
+	// maxNameLen bounds user-supplied names (KB name/slug, filename).
+	maxNameLen = 255
+	// multipartMemoryLimit is how much of an upload stays in RAM before
+	// spooling to disk; the overall body size is capped by the router.
+	multipartMemoryLimit = 1 << 20
+)
+
+// internalError logs the real error and returns a generic message so
+// storage/provider details never reach the client.
+func internalError(w http.ResponseWriter, what string, err error) {
+	log.Printf("knowledge: %s: %v", what, err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
 func slugify(name string) string {
 	slug := slugSanitizer.ReplaceAllString(strings.ToLower(name), "-")
 	return strings.Trim(slug, "-")
@@ -81,9 +98,14 @@ func (h *KnowledgeHandler) CreateKnowledgeBase(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if len(req.Name) > maxNameLen || len(slug) > maxNameLen {
+		http.Error(w, "name/slug too long", http.StatusBadRequest)
+		return
+	}
+
 	kb, err := h.store.EnsureKnowledgeBase(r.Context(), req.Name, slug)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "creating knowledge base", err)
 		return
 	}
 
@@ -94,7 +116,7 @@ func (h *KnowledgeHandler) CreateKnowledgeBase(w http.ResponseWriter, r *http.Re
 func (h *KnowledgeHandler) ListKnowledgeBases(w http.ResponseWriter, r *http.Request) {
 	kbs, err := h.store.ListKnowledgeBases(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "listing knowledge bases", err)
 		return
 	}
 	out := make([]knowledgeBaseDTO, len(kbs))
@@ -116,6 +138,20 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The total body is already capped by MaxBytesReader in the router;
+	// this bounds how much of the multipart form is held in memory (the
+	// rest spools to a temp file, itself bounded by the body cap).
+	if err := r.ParseMultipartForm(multipartMemoryLimit); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "malformed multipart body", http.StatusBadRequest)
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "expected a multipart 'file' field", http.StatusBadRequest)
@@ -125,14 +161,23 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		http.Error(w, "reading upload: "+err.Error(), http.StatusInternalServerError)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		internalError(w, "reading upload", err)
+		return
+	}
+	if len(header.Filename) > maxNameLen {
+		http.Error(w, "filename too long", http.StatusBadRequest)
 		return
 	}
 
 	mimeType := header.Header.Get("Content-Type")
 	doc, err := h.ingest.IngestFile(r.Context(), kbID, header.Filename, mimeType, data)
 	if err != nil && doc == nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "ingesting document", err)
 		return
 	}
 
@@ -144,7 +189,7 @@ func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request)
 	kbID := chi.URLParam(r, "id")
 	docs, err := h.store.ListDocuments(r.Context(), kbID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "listing documents", err)
 		return
 	}
 	out := make([]documentDTO, len(docs))

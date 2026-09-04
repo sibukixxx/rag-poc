@@ -24,7 +24,8 @@ func NewSecretStore(db *sql.DB, box *crypto.SecretBox) *SecretStore {
 }
 
 func (s *SecretStore) Set(ctx context.Context, name string, value []byte) error {
-	ciphertext, nonce, err := s.box.Seal(value)
+	// The name is bound as AAD so rows cannot be swapped under another name.
+	ciphertext, nonce, err := s.box.Seal(value, []byte(name))
 	if err != nil {
 		return err
 	}
@@ -54,7 +55,7 @@ func (s *SecretStore) Get(ctx context.Context, name string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading secret %s: %w", name, err)
 	}
-	return s.box.Open(ciphertext, nonce)
+	return s.box.Open(ciphertext, nonce, []byte(name))
 }
 
 func (s *SecretStore) Delete(ctx context.Context, name string) error {
