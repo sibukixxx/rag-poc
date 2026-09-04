@@ -1,5 +1,7 @@
 # ForgeAI
 
+> ⚠️ **Alpha Release** — v0.1 is under active development. API and configuration may change. Not recommended for production use without caution.
+
 Self-hosted AI Application / RAG / Agent Platform — Single Binary Distribution.
 
 Go バイナリ1個で、Knowledge 取り込み → RAG → Golden Dataset 評価 →
