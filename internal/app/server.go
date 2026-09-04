@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/extractor"
+	"github.com/sibukixxx/rag-poc/internal/adapter/llmrerank"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
+	"github.com/sibukixxx/rag-poc/internal/adapter/vecmem"
 	forgehttp "github.com/sibukixxx/rag-poc/internal/http"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -39,12 +41,21 @@ func (a *App) Serve() error {
 	embedder := BuildEmbedder(a.Config.Embedding, secrets)
 	ingest := usecase.NewIngestUseCase(knowledgeStore, extractor.NewDefaultRegistry(), tok, embedder, prices, traces)
 
+	// Hybrid Search: vecmem (embedded brute-force cosine) + FTS5 trigram,
+	// merged by RRF, with LLM listwise rerank (alias "cheap") available
+	// on request (docs/V0.1_SPEC.md §7).
+	vectorSearcher := vecmem.New(a.DB)
+	keywordSearcher := sqlite.NewFTSStore(a.DB)
+	reranker := llmrerank.New(router, "cheap")
+	search := usecase.NewSearchUseCase(vectorSearcher, keywordSearcher, embedder, reranker, traces)
+
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
 		Version:   Version,
 		Chat:      chat,
 		Knowledge: knowledgeStore,
 		Ingest:    ingest,
+		Search:    search,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

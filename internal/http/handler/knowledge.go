@@ -10,16 +10,18 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/domain/retrieval"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
 type KnowledgeHandler struct {
 	store  knowledge.Store
 	ingest *usecase.IngestUseCase
+	search *usecase.SearchUseCase
 }
 
-func NewKnowledgeHandler(store knowledge.Store, ingest *usecase.IngestUseCase) *KnowledgeHandler {
-	return &KnowledgeHandler{store: store, ingest: ingest}
+func NewKnowledgeHandler(store knowledge.Store, ingest *usecase.IngestUseCase, search *usecase.SearchUseCase) *KnowledgeHandler {
+	return &KnowledgeHandler{store: store, ingest: ingest, search: search}
 }
 
 type knowledgeBaseDTO struct {
@@ -138,6 +140,48 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toDocumentDTO(*doc))
+}
+
+type searchResultDTO struct {
+	ChunkID    string  `json:"chunk_id"`
+	DocumentID string  `json:"document_id"`
+	Filename   string  `json:"filename"`
+	Text       string  `json:"text"`
+	Score      float64 `json:"score"`
+	Page       *int    `json:"page,omitempty"`
+	Heading    string  `json:"heading,omitempty"`
+}
+
+// Search handles POST /api/v1/knowledge-bases/{id}/search
+// ({query, top_k, rerank} -> Hybrid Search results, docs/V0.1_SPEC.md §7).
+func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
+	kbID := chi.URLParam(r, "id")
+
+	var req struct {
+		Query  string `json:"query"`
+		TopK   int    `json:"top_k"`
+		Rerank bool   `json:"rerank"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	results, err := h.search.Search(r.Context(), kbID, req.Query, retrieval.Options{TopK: req.TopK, Rerank: req.Rerank})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	out := make([]searchResultDTO, len(results))
+	for i, res := range results {
+		out[i] = searchResultDTO{
+			ChunkID: res.ChunkID, DocumentID: res.DocumentID, Filename: res.Filename,
+			Text: res.Text, Score: res.Score, Page: res.Page, Heading: res.Heading,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"results": out})
 }
 
 func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {

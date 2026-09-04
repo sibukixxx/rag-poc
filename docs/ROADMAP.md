@@ -47,11 +47,33 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   embeddings API呼び出しが増えないことをサーバログで確認。ブラウザ(Playwright)でもUI経由の
   アップロードとステータス表示を確認。単体テスト全緑、うちハッシュスキップの回帰テストを含む）
 
-### W4: Hybrid Search
-- vecmem（ブルートフォース cosine）+ FTS5 **trigram**（F-4）
-- RRF マージ、search API、UI の Search Playground（スコア・ページ表示）
-- 日本語クエリの手動確認セットで検索品質をチェック
-- **完了条件**: 日本語クエリで vector / keyword 両系統がヒットし、マージ結果が返る
+### W4: Hybrid Search ✅ 完了
+- `internal/adapter/vecmem`: 埋め込みモード用ブルートフォース cosine（`embeddings`テーブルを
+  KB単位でスキャン。上限目安〜数万chunkはドキュメント記載通り）
+- `internal/adapter/sqlite/fts_store.go`: FTS5 **trigram**（F-4）。standalone virtual table
+  （`chunk_id`/`document_id`をUNINDEXEDで保持し、`ReplaceChunks`内で手動同期。content-rowid方式は
+  chunks.idがTEXT PKのため見送り）
+  - **重要な追加知見**: trigramトークナイザは3文字未満のクエリでは一切マッチしない
+    （2文字の日本語クエリ「返品」等が実機検証で0件だった）。**LIKE '%q%' フォールバック**を
+    3文字未満のクエリに適用することで対応（`fts_store.go`の`minTrigramQueryRunes`）
+  - MATCH クエリはユーザー入力をFTS5クエリ構文として解釈させず「フレーズリテラル」として
+    渡す（ダブルクォートでエスケープ）ことで、ハイフン等を含む任意の入力でも構文エラーにならない
+    ようにした
+- `internal/usecase/search.go`: クエリ embed → vector top30 + keyword top30 → RRF(k=60)マージ
+  → （任意）LLM listwise rerank(alias: cheap, `internal/adapter/llmrerank`) → top_k
+  - rerank は fail-soft: LLM呼び出し失敗やレスポンスのパース失敗時は元の順序にフォールバックし、
+    検索全体は失敗させない
+  - 検索呼び出しも Trace に記録（kind: embed/retrieve/rerank）
+- API: `POST /api/v1/knowledge-bases/:id/search {query, top_k, rerank}`
+- UI: Knowledge タブ内に Documents/Search サブタブを追加。スコア・ページ・ファイル名を表示
+- **完了条件**: 日本語クエリで vector / keyword 両系統がヒットし、マージ結果が返る → 確認済み
+  （モックサーバに「返品ポリシー」「配送情報」の2文書をingestし、(1)英語の意味的クエリ
+  "refund for returned item"、(2)3文字以上の日本語部分一致クエリ「返品規定について」、
+  (3)2文字の日本語クエリ「返品」— の3パターンで返品ポリシー文書が正しく上位に来ることを
+  curlで確認。(3)は表層的にはFTS5 trigramでは検出不可能なはずのケースで、LIKEフォールバックが
+  効いていることも確認。rerank:trueでも(フェイクサーバがrerank非対応のため)正しくフォールバックし
+  結果が返ることを確認。ブラウザ(Playwright)でもSearchサブタブの実行と結果表示を確認、
+  既存のChat/Documentsタブの回帰も無し。単体テスト全緑）
 
 ### W5: RAG チャット
 - Context Builder（トークン予算内で chunk 詰め）→ Prompt → LLM → 引用付き回答
