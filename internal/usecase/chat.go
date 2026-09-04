@@ -14,6 +14,10 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/domain/trace"
 )
 
+// defaultMaxTokens caps output length server-side so a single Playground
+// request cannot run up an unbounded provider bill.
+const defaultMaxTokens = 2048
+
 type ChatUseCase struct {
 	Router *llm.Router
 	Prices llm.PriceTable
@@ -34,7 +38,7 @@ func (c *ChatUseCase) Chat(ctx context.Context, alias string, messages []llm.Mes
 
 	traceID := uuid.NewString()
 	start := time.Now()
-	resp, err := provider.Generate(ctx, llm.GenerateRequest{Model: model, Messages: messages})
+	resp, err := provider.Generate(ctx, llm.GenerateRequest{Model: model, Messages: messages, MaxTokens: defaultMaxTokens})
 	duration := time.Since(start)
 
 	status := trace.StatusOK
@@ -91,7 +95,7 @@ func (c *ChatUseCase) ChatStream(ctx context.Context, alias string, messages []l
 		return nil, err
 	}
 
-	upstream, err := provider.Stream(ctx, llm.GenerateRequest{Model: model, Messages: messages})
+	upstream, err := provider.Stream(ctx, llm.GenerateRequest{Model: model, Messages: messages, MaxTokens: defaultMaxTokens})
 	if err != nil {
 		return nil, err
 	}

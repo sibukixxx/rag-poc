@@ -1,0 +1,39 @@
+# ForgeAI を自前ホスト(手元 PC / 既存 VPS / Raspberry Pi 等)で動かし、
+# Cloudflare Tunnel 経由で公開する最小構成。Cloudflare 側の費用は $0。
+#
+#   cp .env.example .env   # FORGEAI_MASTER_KEY / FORGEAI_OPENAI_API_KEY / TUNNEL_TOKEN を記入
+#   docker compose up -d --build
+#
+# 手順の全体像は docs/deploy-cloudflare.md を参照。
+
+services:
+  forgeai:
+    build:
+      context: .
+      args:
+        VERSION: ${FORGEAI_VERSION:-dev}
+    image: forgeai:local
+    restart: unless-stopped
+    environment:
+      FORGEAI_MASTER_KEY: ${FORGEAI_MASTER_KEY:?FORGEAI_MASTER_KEY を .env に設定してください (forgeai init で生成)}
+      FORGEAI_OPENAI_API_KEY: ${FORGEAI_OPENAI_API_KEY:-}
+      # FORGEAI_PORT / FORGEAI_DB_PATH / FORGEAI_STORAGE_PATH は Dockerfile の既定値を使う
+    volumes:
+      - forgeai-data:/data
+    # 外部公開は cloudflared 経由のみ。ホストからの直接アクセスは localhost に限定する。
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  cloudflared:
+    # 公開経路を終端するコンポーネントなのでタグを固定する(更新時はここを上げる)
+    image: cloudflare/cloudflared:2026.8.3
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # Zero Trust ダッシュボード → Networks → Tunnels → Create tunnel で発行されるトークン
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN を .env に設定してください (Cloudflare Zero Trust で発行)}
+    depends_on:
+      - forgeai
+
+volumes:
+  forgeai-data:

@@ -48,10 +48,15 @@ func (a *App) Serve() error {
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
+	// No WriteTimeout: SSE chat responses set their own write deadline in
+	// the handler. ReadTimeout bounds slow-loris request bodies (uploads are
+	// size-capped by the router), IdleTimeout reaps idle keep-alives.
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)

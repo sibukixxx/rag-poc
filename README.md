@@ -1,5 +1,7 @@
 # ForgeAI
 
+> ⚠️ **Alpha Release** — v0.1 is under active development. API and configuration may change. Not recommended for production use without caution.
+
 Self-hosted AI Application / RAG / Agent Platform — Single Binary Distribution.
 
 Go バイナリ1個で、Knowledge 取り込み → RAG → Golden Dataset 評価 →
@@ -10,6 +12,7 @@ Before/After 比較 → Runtime API デプロイまでを提供する（v0.1 ス
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — 構想の検証結果（採用方針・修正点・技術リスク）
 - [docs/V0.1_SPEC.md](docs/V0.1_SPEC.md) — v0.1 確定仕様（スコープ / interface / スキーマ / API / 受け入れテスト）
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 週次ロードマップ（v0.1 = 12週）
+- [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Cloudflare への最安デプロイ（Tunnel + Access で $0 / Containers は有料）
 
 ## Getting Started (W1-W3)
 
@@ -17,7 +20,7 @@ Before/After 比較 → Runtime API デプロイまでを提供する（v0.1 ス
 make build
 ./dist/forgeai init                        # generates forgeai.yaml + a master key
 export FORGEAI_MASTER_KEY=...              # printed by init
-export FORGEAI_OPENAI_API_KEY=sk-...       # or: forgeai secret set openai <key>
+export FORGEAI_OPENAI_API_KEY=sk-...       # or: echo "$KEY" | ./dist/forgeai secret set openai
 ./dist/forgeai doctor                      # checks config / db / master key / LLM aliases / embedding model
 ./dist/forgeai serve                       # http://localhost:8080
 ```
@@ -34,6 +37,17 @@ Open http://localhost:8080 for two tabs:
 The React source lives in `web/`; run `npm run build` there after UI changes
 (the built `web/dist` is committed so `go build` alone still works without
 Node installed).
+
+## Deploy
+
+```sh
+cp .env.example .env      # FORGEAI_MASTER_KEY / FORGEAI_OPENAI_API_KEY / TUNNEL_TOKEN
+docker compose up -d --build
+```
+
+`Dockerfile` で単一バイナリのコンテナを作り、`docker-compose.yml` の `cloudflared` サービスが
+Cloudflare Tunnel 経由で公開する（Cloudflare 側は無料）。Workers には Go + SQLite のまま載らないため、
+選択肢と手順は [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) を参照。
 
 ## v0.1 完成条件（要約）
 
