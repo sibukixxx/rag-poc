@@ -21,113 +21,167 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — Design decisions, trade-offs, risk assessment
 - [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Free deployment guide (Cloudflare Tunnel + Workers)
 
-## Quick Start
+## Installation
 
 ### Prerequisites
-- Go 1.25+
-- An OpenAI-compatible LLM API (OpenAI, Ollama, etc.)
-- A Linux/macOS/Windows machine
+- Go 1.25+ ([install](https://go.dev/doc/install))
+- An OpenAI-compatible LLM provider (OpenAI, Ollama, LM Studio, etc.)
+- Docker (optional, for containerized deployment)
 
-### 1. Build
+### Build
 
-```sh
+```bash
 make build
 ```
 
-The binary `dist/forgeai` is fully static (CGO_ENABLED=0) and runs everywhere.
+This produces a fully static binary at `dist/forgeai` (CGO_ENABLED=0, no external libc needed).
 
-### 2. Initialize
+## Quick Start
 
-```sh
+### 1. Initialize
+
+```bash
 ./dist/forgeai init
 ```
 
 This generates:
 - `forgeai.yaml` — configuration file
-- A random `FORGEAI_MASTER_KEY` — **save this securely**
+- `FORGEAI_MASTER_KEY` — **save this value securely**
 
-### 3. Configure LLM
+### 2. Configure Your LLM
 
-Set your OpenAI API key (or compatible endpoint):
+Set your API credentials. The easiest way is via environment:
 
-```sh
-export FORGEAI_MASTER_KEY=your_key_from_init
+```bash
+export FORGEAI_MASTER_KEY=<value_from_init>
 export FORGEAI_OPENAI_API_KEY=sk-...
 ```
 
-Or use the interactive prompt:
+Or use the interactive prompt to store securely in the database:
 
-```sh
+```bash
 echo "sk-..." | ./dist/forgeai secret set openai
 ```
 
-### 4. Start the Server
+### 3. Verify Configuration
 
-```sh
-./dist/forgeai doctor     # verify configuration
-./dist/forgeai serve      # starts on http://localhost:8080
+```bash
+./dist/forgeai doctor
 ```
 
-### 5. Open the UI
+This checks your LLM connection, database setup, and master key.
 
-Visit http://localhost:8080 and you'll see two tabs:
+### 4. Start the Server
 
-**Chat**
-- Select a model alias (cheap / normal / judge)
-- Chat with the LLM and see token counts & costs
-- All conversations are stored with trace data in SQLite
+```bash
+./dist/forgeai serve
+```
 
-**Knowledge**
+The UI will be at `http://localhost:8080`.
+
+### 5. Use ForgeAI
+
+**Chat Tab**
+- Select an LLM alias (cheap / normal / judge)
+- Chat interactively
+- See token usage and API costs per message
+- Full conversation history stored in SQLite
+
+**Knowledge Tab**
 - Create a knowledge base
-- Upload files (PDF, TXT, MD, HTML, CSV, JSON)
-- ForgeAI chunks, normalizes, and embeds documents
-- Identical re-uploads skip the embedding API cost
-- Query your knowledge via the chat interface
+- Upload files: PDF, TXT, MD, HTML, CSV, JSON
+- Documents are automatically:
+  - Chunked with token-aware splitting
+  - Embedded via your configured model
+  - Deduplicated (identical re-uploads cost zero API calls)
+- Query documents via semantic search
 
 ## Development
 
-The React UI source is in `web/`. Rebuild after changes:
+### Building the UI
 
-```sh
+The React source is in `web/`. After UI changes, rebuild:
+
+```bash
 cd web && npm run build
 ```
 
-The built output (`web/dist`) is committed, so a plain `go build` works without Node installed.
+The built output is committed, so `go build` works without Node.js.
+
+### Testing
+
+```bash
+make test
+make vet
+```
 
 ## Deployment
 
-### Local (Docker)
+### Local (Docker Compose)
 
-```sh
+For quick self-hosting:
+
+```bash
 cp .env.example .env
-# Edit .env with your FORGEAI_MASTER_KEY and FORGEAI_OPENAI_API_KEY
+# Edit .env with your FORGEAI_MASTER_KEY and API credentials
 docker compose up -d --build
 ```
 
-The `docker-compose.yml` includes:
-- **forgeai** service — the Go binary
-- **cloudflared** tunnel — routes external traffic securely
+This starts:
+- **forgeai** — the application
+- **cloudflared** — Cloudflare Tunnel for secure external access (free)
 
 ### Production (Cloudflare)
 
-ForgeAI works great behind Cloudflare Access (free tier). See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for step-by-step instructions and cost breakdown.
+ForgeAI works well behind Cloudflare Access (free tier) with Cloudflare Tunnel for routing.
 
-**Note:** Workers doesn't support Go + SQLite, so use the Docker approach with Cloudflare Tunnel (free) instead.
+For step-by-step instructions, cost breakdown, and alternative deployment options, see [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md).
+
+**Note:** Cloudflare Workers doesn't support Go + SQLite, so Docker with Tunnel is the recommended approach.
+
+## Architecture
+
+ForgeAI uses clean layered architecture:
+
+```
+cmd/forgeai        ← Main entry point (bootstrap, CLI, API server)
+  ↓
+internal/app       ← Wiring, HTTP server setup
+  ↓
+internal/http      ← Chi router, API handlers, SSE
+internal/usecase   ← Business logic (chat, ingest)
+  ↓
+internal/domain    ← Interfaces only (no external deps)
+  ↓
+internal/adapter   ← Implementations
+  ├─ sqlite        ← Database & embedded migrations
+  ├─ crypto        ← AES-GCM secret storage
+  ├─ openaicompat  ← LLM & embedding client
+  └─ extractor     ← PDF, HTML, text parsing
+```
+
+See [AGENTS.md](AGENTS.md) for detailed design decisions and conventions.
 
 ## v0.1 Roadmap
 
 ```
-Document Upload  →  Hybrid Search  →  Golden Dataset Eval  →  Before/After Comparison  →  API Deployment
-        ↓               ↓                      ↓                      ↓                           ↓
-   PDF/TXT/MD/   Japanese-aware        50 eval questions      Quality/Cost/Latency      /runtime/v1/chat
-   HTML/CSV/JSON  semantic + BM25      (retrieval + LLM)      metrics (side-by-side)    endpoints
+Upload Documents  →  Semantic Search  →  Golden Dataset Eval  →  Quality Analysis  →  Deploy API
+       ↓                   ↓                      ↓                    ↓                  ↓
+  PDF/TXT/MD/      Hybrid (BM25 +          50 benchmark          Side-by-side       /runtime/v1
+  HTML/CSV/JSON    vectors, multi-lang)    questions             Before/After        chat endpoints
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for weekly milestones.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the 12-week development plan.
 
 ## License
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+## Contributing
+
+We welcome pull requests and issues! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+For security issues, see [SECURITY.md](SECURITY.md).
 
 ---
 
