@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const ALIASES = ['cheap', 'normal', 'judge']
 
@@ -25,9 +25,28 @@ function parseSSEBuffer(buffer, onEvent) {
 
 function Chat() {
   const [alias, setAlias] = useState('normal')
+  const [knowledgeBases, setKnowledgeBases] = useState([])
+  const [kbId, setKbId] = useState('')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
   const [sending, setSending] = useState(false)
+  const [expanded, setExpanded] = useState(() => new Set())
+
+  useEffect(() => {
+    fetch('/api/v1/knowledge-bases')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((kbs) => setKnowledgeBases(kbs || []))
+      .catch(() => setKnowledgeBases([]))
+  }, [])
+
+  function toggleCitation(key) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   async function sendMessage() {
     const text = input.trim()
@@ -38,10 +57,6 @@ function Chat() {
     setInput('')
     setSending(true)
 
-    const apiMessages = history
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role, content: m.content }))
-
     let content = ''
     const setAssistant = (patch) =>
       setMessages((prev) => {
@@ -51,10 +66,21 @@ function Chat() {
       })
 
     try {
-      const resp = await fetch('/api/v1/chat', {
+      const useRAG = Boolean(kbId)
+      const url = useRAG ? `/api/v1/knowledge-bases/${kbId}/chat` : '/api/v1/chat'
+      const body = useRAG
+        ? { alias, query: text }
+        : {
+            alias,
+            messages: history
+              .filter((m) => m.role === 'user' || m.role === 'assistant')
+              .map((m) => ({ role: m.role, content: m.content })),
+          }
+
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alias, messages: apiMessages }),
+        body: JSON.stringify(body),
       })
       if (!resp.ok) {
         throw new Error((await resp.text()) || `HTTP ${resp.status}`)
@@ -77,6 +103,8 @@ function Chat() {
           if (evt.done) {
             setAssistant({
               meta: { traceId: evt.trace_id, usage: evt.usage, costUsd: evt.cost_usd },
+              citations: evt.citations || [],
+              noContext: evt.no_context || false,
             })
           }
         })
@@ -99,6 +127,10 @@ function Chat() {
     }
   }
 
+  const modeLabel = kbId
+    ? `RAG chat over ${(knowledgeBases.find((k) => k.id === kbId) || {}).name || 'knowledge base'}`
+    : `plain chat (${alias} alias)`
+
   return (
     <div className="view chat-view">
       <div className="view-toolbar">
@@ -109,12 +141,18 @@ function Chat() {
             </option>
           ))}
         </select>
+        <select value={kbId} onChange={(e) => setKbId(e.target.value)} disabled={sending}>
+          <option value="">No knowledge base (plain chat)</option>
+          {knowledgeBases.map((kb) => (
+            <option key={kb.id} value={kb.id}>
+              {kb.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <main className="messages">
-        {messages.length === 0 && (
-          <p className="empty">Ask something to try the LLM Router ({alias} alias).</p>
-        )}
+        {messages.length === 0 && <p className="empty">Ask something to try {modeLabel}.</p>}
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
             <div className="bubble-content">{m.content || (sending && i === messages.length - 1 ? '…' : '')}</div>
@@ -127,6 +165,24 @@ function Chat() {
                 )}
                 {typeof m.meta.costUsd === 'number' && <span> · ${m.meta.costUsd.toFixed(6)}</span>}
                 {m.meta.traceId && <span> · trace {m.meta.traceId.slice(0, 8)}</span>}
+              </div>
+            )}
+            {m.noContext && <div className="bubble-meta">No matching context found in the knowledge base.</div>}
+            {m.citations && m.citations.length > 0 && (
+              <div className="citations">
+                {m.citations.map((c) => {
+                  const key = `${i}:${c.index}`
+                  const isOpen = expanded.has(key)
+                  return (
+                    <div key={key} className="citation">
+                      <button className="citation-chip" onClick={() => toggleCitation(key)}>
+                        [{c.index}] {c.filename}
+                        {c.page != null ? ` p.${c.page}` : ''}
+                      </button>
+                      {isOpen && <p className="citation-text">{c.text}</p>}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

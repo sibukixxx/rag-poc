@@ -12,6 +12,8 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/domain/prompt"
+	"github.com/sibukixxx/rag-poc/internal/domain/trace"
 	"github.com/sibukixxx/rag-poc/internal/http/handler"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -36,6 +38,10 @@ type Deps struct {
 	Chat      *usecase.ChatUseCase
 	Knowledge knowledge.Store
 	Ingest    *usecase.IngestUseCase
+	Search    *usecase.SearchUseCase
+	RAGChat   *usecase.RAGChatUseCase
+	Prompts   prompt.Store
+	Traces    trace.Store
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -49,7 +55,9 @@ func NewRouter(deps Deps) http.Handler {
 
 	health := handler.NewHealthHandler(deps.DB, deps.Version)
 	chat := handler.NewChatHandler(deps.Chat)
-	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest)
+	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search, deps.RAGChat)
+	prompts := handler.NewPromptHandler(deps.Prompts)
+	traces := handler.NewTraceHandler(deps.Traces)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(denyCrossSite)
@@ -61,6 +69,15 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/knowledge-bases", kb.ListKnowledgeBases)
 		r.With(limitBody(maxUploadBody)).Post("/knowledge-bases/{id}/documents", kb.UploadDocument)
 		r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
+		r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/search", kb.Search)
+		r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/chat", kb.Chat)
+		r.With(limitBody(maxJSONBody)).Post("/prompts", prompts.Create)
+		r.Get("/prompts", prompts.List)
+		r.Get("/prompts/{id}/versions", prompts.ListVersions)
+		r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/versions", prompts.CreateVersion)
+		r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/activate", prompts.Activate)
+		r.Get("/traces", traces.List)
+		r.Get("/traces/{id}", traces.Get)
 	})
 
 	r.Handle("/*", noDirListing(staticHandler()))

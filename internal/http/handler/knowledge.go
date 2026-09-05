@@ -3,25 +3,30 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/domain/retrieval"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
 type KnowledgeHandler struct {
-	store  knowledge.Store
-	ingest *usecase.IngestUseCase
+	store   knowledge.Store
+	ingest  *usecase.IngestUseCase
+	search  *usecase.SearchUseCase
+	ragChat *usecase.RAGChatUseCase
 }
 
-func NewKnowledgeHandler(store knowledge.Store, ingest *usecase.IngestUseCase) *KnowledgeHandler {
-	return &KnowledgeHandler{store: store, ingest: ingest}
+func NewKnowledgeHandler(store knowledge.Store, ingest *usecase.IngestUseCase, search *usecase.SearchUseCase, ragChat *usecase.RAGChatUseCase) *KnowledgeHandler {
+	return &KnowledgeHandler{store: store, ingest: ingest, search: search, ragChat: ragChat}
 }
 
 type knowledgeBaseDTO struct {
@@ -185,6 +190,52 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(toDocumentDTO(*doc))
 }
 
+type searchResultDTO struct {
+	ChunkID    string  `json:"chunk_id"`
+	DocumentID string  `json:"document_id"`
+	Filename   string  `json:"filename"`
+	Text       string  `json:"text"`
+	Score      float64 `json:"score"`
+	Page       *int    `json:"page,omitempty"`
+	Heading    string  `json:"heading,omitempty"`
+}
+
+// Search handles POST /api/v1/knowledge-bases/{id}/search
+// ({query, top_k, rerank} -> Hybrid Search results, docs/V0.1_SPEC.md §7).
+func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
+	kbID := chi.URLParam(r, "id")
+
+	var req struct {
+		Query  string `json:"query"`
+		TopK   int    `json:"top_k"`
+		Rerank bool   `json:"rerank"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		http.Error(w, "query must not be empty", http.StatusBadRequest)
+		return
+	}
+
+	results, err := h.search.Search(r.Context(), kbID, req.Query, retrieval.Options{TopK: req.TopK, Rerank: req.Rerank})
+	if err != nil {
+		internalError(w, "searching knowledge base", err)
+		return
+	}
+
+	out := make([]searchResultDTO, len(results))
+	for i, res := range results {
+		out[i] = searchResultDTO{
+			ChunkID: res.ChunkID, DocumentID: res.DocumentID, Filename: res.Filename,
+			Text: res.Text, Score: res.Score, Page: res.Page, Heading: res.Heading,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"results": out})
+}
+
 func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 	kbID := chi.URLParam(r, "id")
 	docs, err := h.store.ListDocuments(r.Context(), kbID)
@@ -198,4 +249,108 @@ func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
+}
+
+type citationDTO struct {
+	Index      int    `json:"index"`
+	ChunkID    string `json:"chunk_id"`
+	DocumentID string `json:"document_id"`
+	Filename   string `json:"filename"`
+	Page       *int   `json:"page,omitempty"`
+	Heading    string `json:"heading,omitempty"`
+	Text       string `json:"text"`
+}
+
+type ragChatStreamEventDTO struct {
+	Delta     string        `json:"delta,omitempty"`
+	Done      bool          `json:"done,omitempty"`
+	TraceID   string        `json:"trace_id,omitempty"`
+	Usage     *usageDTO     `json:"usage,omitempty"`
+	CostUSD   float64       `json:"cost_usd,omitempty"`
+	Citations []citationDTO `json:"citations,omitempty"`
+	NoContext bool          `json:"no_context,omitempty"`
+	Error     string        `json:"error,omitempty"`
+}
+
+// Chat handles POST /api/v1/knowledge-bases/{id}/chat (SSE): retrieves
+// context from the knowledge base and streams an answer that cites it
+// (docs/ROADMAP.md W5). Unlike /api/v1/chat, this takes a single query,
+// not a message history — each question is answered independently by
+// retrieving fresh context for it.
+func (h *KnowledgeHandler) Chat(w http.ResponseWriter, r *http.Request) {
+	kbID := chi.URLParam(r, "id")
+
+	var req struct {
+		Alias  string `json:"alias"`
+		Query  string `json:"query"`
+		Rerank bool   `json:"rerank"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if req.Alias == "" {
+		req.Alias = "normal"
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		http.Error(w, "query must not be empty", http.StatusBadRequest)
+		return
+	}
+	if len(req.Query) > maxChatContentChars {
+		http.Error(w, fmt.Sprintf("query too long (max %d chars)", maxChatContentChars), http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	result, err := h.ragChat.ChatStream(r.Context(), kbID, req.Alias, req.Query, req.Rerank)
+	if err != nil {
+		log.Printf("knowledge: rag chat kb=%s alias=%q: %v", kbID, req.Alias, err)
+		http.Error(w, "chat failed", http.StatusBadGateway)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// SSE responses are exempt from a global WriteTimeout, so bound them
+	// here instead of leaving a slow reader attached forever.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sseWriteDeadline))
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	write := func(ev ragChatStreamEventDTO) {
+		payload, _ := json.Marshal(ev)
+		fmt.Fprintf(w, "data: %s\n\n", payload)
+		flusher.Flush()
+	}
+
+	for ev := range result.Events {
+		switch {
+		case ev.Err != nil:
+			log.Printf("knowledge: rag chat stream trace=%s: %v", result.TraceID, ev.Err)
+			write(ragChatStreamEventDTO{Error: "upstream provider error", TraceID: result.TraceID})
+		case ev.Done:
+			citations := make([]citationDTO, len(ev.Citations))
+			for i, c := range ev.Citations {
+				citations[i] = citationDTO{
+					Index: c.Index, ChunkID: c.ChunkID, DocumentID: c.DocumentID,
+					Filename: c.Filename, Page: c.Page, Heading: c.Heading, Text: c.Text,
+				}
+			}
+			write(ragChatStreamEventDTO{
+				Done: true, TraceID: result.TraceID,
+				Usage:     &usageDTO{InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens},
+				CostUSD:   ev.CostUSD,
+				Citations: citations,
+				NoContext: ev.NoContext,
+			})
+		default:
+			write(ragChatStreamEventDTO{Delta: ev.Delta})
+		}
+	}
 }

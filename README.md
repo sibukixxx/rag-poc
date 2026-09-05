@@ -70,19 +70,30 @@ echo "sk-..." | ./dist/forgeai secret set openai
 
 ### 5. Open the UI
 
-Visit http://localhost:8080 and you'll see two tabs:
+Visit http://localhost:8080 for four tabs:
 
-**Chat**
-- Select a model alias (cheap / normal / judge)
-- Chat with the LLM and see token counts & costs
-- All conversations are stored with trace data in SQLite
+**Chat** — pick an alias (cheap / normal / judge) and chat; each reply
+shows tokens and cost. Every call is recorded as a Trace+Span in SQLite.
+Optionally pick a knowledge base too: each question is then answered by
+Hybrid Search retrieval + an LLM prompted to cite its sources inline
+(`[1]`, `[2]`, ...). Citation chips below the answer expand to show the
+cited chunk's text.
 
-**Knowledge**
-- Create a knowledge base
-- Upload files (PDF, TXT, MD, HTML, CSV, JSON)
-- ForgeAI chunks, normalizes, and embeds documents
-- Identical re-uploads skip the embedding API cost
-- Query your knowledge via the chat interface
+**Knowledge** — create a knowledge base and upload a file (PDF, TXT, MD,
+HTML, CSV, JSON). It's loaded, NFKC-normalized, chunked (token-based,
+tiktoken), hashed, and embedded — re-uploading identical content reuses
+the existing embedding instead of re-calling the API. A **Search**
+sub-tab runs Hybrid Search (embedding cosine + FTS5 trigram keyword,
+merged by RRF, with an optional LLM rerank) over the selected knowledge
+base and shows each hit's score, filename, and page.
+
+**Prompts** — the RAG chat's system prompt lives here, not in code.
+Write a new version, diff it against the previous one, and activate it —
+the very next RAG chat call uses it, no redeploy needed.
+
+**Traces** — every chat, RAG chat, search, and ingest call is recorded
+here with its spans (kind, latency, tokens, cost, status), so you can see
+exactly what a prompt or config change did to behavior.
 
 ## Development
 
@@ -159,8 +170,15 @@ export FORGEAI_OPENAI_API_KEY=sk-...
 
 ブラウザで http://localhost:8080 を開くと：
 
-- **Chat** — LLM とチャット。トークン数とコストを表示
-- **Knowledge** — PDF など文書をアップロード。意味検索で質問に答える
+- **Chat** — LLM とチャット。トークン数とコストを表示。ナレッジベースを選ぶと
+  Hybrid Search で検索した根拠を引用付き（`[1]`, `[2]`...）で回答
+- **Knowledge** — PDF など文書をアップロード。チャンク分割・正規化・埋め込みは
+  自動、同一内容の再アップロードは embedding を再生成しない。**Search** サブタブで
+  ベクトル+キーワードのハイブリッド検索を単独実行可能
+- **Prompts** — RAG チャットのシステムプロンプトをコード変更なしで編集・
+  バージョン管理・切り替え（diff 表示付き）
+- **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
+  （種別・レイテンシ・トークン・コスト・状態）で確認可能
 
 ### デプロイ
 

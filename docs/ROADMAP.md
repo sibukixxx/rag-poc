@@ -47,23 +47,87 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   embeddings API呼び出しが増えないことをサーバログで確認。ブラウザ(Playwright)でもUI経由の
   アップロードとステータス表示を確認。単体テスト全緑、うちハッシュスキップの回帰テストを含む）
 
-### W4: Hybrid Search
-- vecmem（ブルートフォース cosine）+ FTS5 **trigram**（F-4）
-- RRF マージ、search API、UI の Search Playground（スコア・ページ表示）
-- 日本語クエリの手動確認セットで検索品質をチェック
-- **完了条件**: 日本語クエリで vector / keyword 両系統がヒットし、マージ結果が返る
+### W4: Hybrid Search ✅ 完了
+- `internal/adapter/vecmem`: 埋め込みモード用ブルートフォース cosine（`embeddings`テーブルを
+  KB単位でスキャン。上限目安〜数万chunkはドキュメント記載通り）
+- `internal/adapter/sqlite/fts_store.go`: FTS5 **trigram**（F-4）。standalone virtual table
+  （`chunk_id`/`document_id`をUNINDEXEDで保持し、`ReplaceChunks`内で手動同期。content-rowid方式は
+  chunks.idがTEXT PKのため見送り）
+  - **重要な追加知見**: trigramトークナイザは3文字未満のクエリでは一切マッチしない
+    （2文字の日本語クエリ「返品」等が実機検証で0件だった）。**LIKE '%q%' フォールバック**を
+    3文字未満のクエリに適用することで対応（`fts_store.go`の`minTrigramQueryRunes`）
+  - MATCH クエリはユーザー入力をFTS5クエリ構文として解釈させず「フレーズリテラル」として
+    渡す（ダブルクォートでエスケープ）ことで、ハイフン等を含む任意の入力でも構文エラーにならない
+    ようにした
+- `internal/usecase/search.go`: クエリ embed → vector top30 + keyword top30 → RRF(k=60)マージ
+  → （任意）LLM listwise rerank(alias: cheap, `internal/adapter/llmrerank`) → top_k
+  - rerank は fail-soft: LLM呼び出し失敗やレスポンスのパース失敗時は元の順序にフォールバックし、
+    検索全体は失敗させない
+  - 検索呼び出しも Trace に記録（kind: embed/retrieve/rerank）
+- API: `POST /api/v1/knowledge-bases/:id/search {query, top_k, rerank}`
+- UI: Knowledge タブ内に Documents/Search サブタブを追加。スコア・ページ・ファイル名を表示
+- **完了条件**: 日本語クエリで vector / keyword 両系統がヒットし、マージ結果が返る → 確認済み
+  （モックサーバに「返品ポリシー」「配送情報」の2文書をingestし、(1)英語の意味的クエリ
+  "refund for returned item"、(2)3文字以上の日本語部分一致クエリ「返品規定について」、
+  (3)2文字の日本語クエリ「返品」— の3パターンで返品ポリシー文書が正しく上位に来ることを
+  curlで確認。(3)は表層的にはFTS5 trigramでは検出不可能なはずのケースで、LIKEフォールバックが
+  効いていることも確認。rerank:trueでも(フェイクサーバがrerank非対応のため)正しくフォールバックし
+  結果が返ることを確認。ブラウザ(Playwright)でもSearchサブタブの実行と結果表示を確認、
+  既存のChat/Documentsタブの回帰も無し。単体テスト全緑）
 
-### W5: RAG チャット
-- Context Builder（トークン予算内で chunk 詰め）→ Prompt → LLM → 引用付き回答
-- LLM rerank（任意、デフォルト off）
-- Playground を KB 接続チャットに拡張（引用リンク → chunk 表示）
-- **完了条件**: 「返品規定について教えて」に引用付きで答える
+### W5: RAG チャット ✅ 完了
+- `internal/usecase/rag_context.go`: Context Builder。SearchUseCase の結果を
+  `[1]`, `[2]`... と採番し、トークン予算（既定2000）に収まる範囲で詰める。
+  ランク最上位のチャンクは予算を超えても必ず1件は含める（0件で答えるよりまし）
+- `internal/usecase/rag_chat.go`: `RAGChatUseCase.ChatStream` — Search → Context Builder →
+  system prompt（「番号付き引用元のみに基づき、`[n]`で逐次引用して回答せよ」）→ LLM Stream。
+  ChatUseCase と同様に Trace/Span を記録
+- LLM rerank は W4 で実装済みの `retrieval.Options.Rerank` をそのまま渡す形で対応
+  （既定 off、リクエストで `rerank: true` にすると有効）
+- API: `POST /api/v1/knowledge-bases/:id/chat`（SSE。`{alias, query, rerank}` →
+  delta イベント + 最終 `{done, usage, cost_usd, citations, no_context}` イベント）
+- UI: Chat タブに KB セレクタを追加。KB 未選択時は従来通りの複数ターンチャット、
+  KB 選択時はその質問単体で RAG 検索し直す1問1答モードに切り替わる。回答の下に
+  引用チップ（`[1] filename.md p.2`）を表示し、クリックで該当チャンク本文を展開表示
+- **完了条件**: 「返品規定について教えて」に引用付きで答える → 確認済み
+  （モックサーバに返品ポリシー文書をingestし、RAGチャットAPIへ日本語で質問→
+  「返品は商品到着後30日以内であれば可能です [1]。」という引用付き回答と、
+  filename/text入りのcitationsが返ることをcurlで確認。空のKBに対する質問では
+  `no_context:true`が正しく返ることも確認。ブラウザ(Playwright)でもKB選択→
+  質問→引用チップ表示→クリックで本文展開、を実演。既存の平文チャット/
+  Documents/Searchタブの回帰も無し。単体テスト全緑）
 
-### W6: Prompt Registry + Trace UI
-- prompts / prompt_versions CRUD + UI（バージョン一覧・diff）
-- RAG パイプラインが prompt version を参照する形に変更
-- Trace 一覧 / 詳細 UI（span ツリー、レイテンシ・コスト内訳）
-- **完了条件**: prompt を v2 に切り替えて挙動が変わり、Trace で全過程を追える
+### W6: Prompt Registry + Trace UI ✅ 完了
+- `internal/domain/prompt` + `internal/adapter/sqlite/prompt_store.go`: `prompts`/`prompt_versions`
+  テーブル（migration 0005）。`CreateVersion`は自動採番（1始まり）し、**最初の1件だけ自動的に
+  active化**、2件目以降は明示的な`SetActiveVersion`が必要（誤って新バージョンがいきなり
+  本番投入されるのを防ぐ）
+- API: `POST/GET /api/v1/prompts`, `GET/POST /api/v1/prompts/:id/versions`,
+  `POST /api/v1/prompts/:id/activate`
+- `internal/usecase/rag_chat.go`: system prompt を Prompt Registry の active version から
+  都度取得する形に変更（`RAGChatUseCase.systemPrompt`）。レジストリ未設定/未シードでも
+  `DefaultRAGSystemPrompt` にフォールバックする fail-soft 設計
+- `internal/app/prompts.go`: `forgeai serve` 起動時に `rag_system` プロンプトのv1を
+  （旧ハードコード文言と同一内容で）自動シード。既存インストールの挙動を変えずに
+  レジストリへ移行できる
+- Trace: `GET /api/v1/traces`（一覧）/ `GET /api/v1/traces/:id`（trace + spans）。
+  span同士に親子関係は無いため「span ツリー」はv0.1では時系列フラットリストに簡略化
+- UI: 新規 Prompts タブ（プロンプト作成、バージョン一覧、`diff`パッケージによる
+  隣接バージョンの差分表示、ワンクリックでのactivate）。新規 Traces タブ
+  （trace一覧→クリックでspan内訳＝kind/duration/tokens/cost/statusを表示）
+- **完了条件**: prompt を v2 に切り替えて挙動が変わり、Trace で全過程を追える → 確認済み
+  （モックサーバの system prompt に応じて応答を分岐させ、v1では通常の日本語回答、
+  v2（"PIRATE_MODE"）に`activate`で切り替えた直後の呼び出しから応答が変化することを
+  **コード再デプロイなしで** curl 実証。Trace一覧/詳細APIで rag_chat/search/ingest:embed
+  各traceとそのspan内訳（tokens/cost/status）を取得できることも確認。ブラウザ(Playwright)
+  でもPromptsタブでのバージョン作成・diff表示・activate、Traces タブでの一覧→詳細展開を
+  確認。全Go単体テスト緑（`TestRAGChatUsesActivePromptVersionAndReactsToSwitch`が
+  この完了条件そのものを検証）
+- **既知の積み残し**（W6スコープ外、次回対応）: `SearchUseCase`（W4実装）のembed/retrieve/
+  rerank spanは token数・costが未記録（`llm.Embedder`がusageを返さない設計のため、
+  ingestion側のように`Tokenizer.Count`で概算する対応が必要）。Trace UIで実際に
+  search系traceのcostが¥0固定で表示されることをE2E確認時に発見。SearchUseCaseの
+  コンストラクタ変更が複数箇所に波及するため、W6の変更範囲としては見送り
 
 ### W7: Golden Dataset + Retrieval 評価
 - datasets / dataset_cases、JSON / CSV インポート（UI + CLI）

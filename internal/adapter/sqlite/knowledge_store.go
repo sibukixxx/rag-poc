@@ -168,19 +168,31 @@ func (s *KnowledgeStore) ReplaceChunks(ctx context.Context, documentID string, c
 	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE document_id = ?`, documentID); err != nil {
 		return fmt.Errorf("clearing old chunks for document %s: %w", documentID, err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_fts WHERE document_id = ?`, documentID); err != nil {
+		return fmt.Errorf("clearing old FTS rows for document %s: %w", documentID, err)
+	}
 
-	stmt, err := tx.PrepareContext(ctx, `
+	chunkStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO chunks (id, document_id, idx, text, token_count, page, heading, hash)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("preparing chunk insert: %w", err)
 	}
-	defer stmt.Close()
+	defer chunkStmt.Close()
+
+	ftsStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks_fts (chunk_id, document_id, text) VALUES (?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("preparing FTS insert: %w", err)
+	}
+	defer ftsStmt.Close()
 
 	for _, c := range chunks {
-		if _, err := stmt.ExecContext(ctx, c.ID, documentID, c.Index, c.Text, c.TokenCount, c.Page, c.Heading, c.Hash); err != nil {
+		if _, err := chunkStmt.ExecContext(ctx, c.ID, documentID, c.Index, c.Text, c.TokenCount, c.Page, c.Heading, c.Hash); err != nil {
 			return fmt.Errorf("inserting chunk %s: %w", c.ID, err)
+		}
+		if _, err := ftsStmt.ExecContext(ctx, c.ID, documentID, c.Text); err != nil {
+			return fmt.Errorf("inserting FTS row for chunk %s: %w", c.ID, err)
 		}
 	}
 
