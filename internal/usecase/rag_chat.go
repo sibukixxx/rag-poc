@@ -9,6 +9,7 @@ import (
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
+	"github.com/sibukixxx/rag-poc/internal/domain/prompt"
 	"github.com/sibukixxx/rag-poc/internal/domain/retrieval"
 	"github.com/sibukixxx/rag-poc/internal/domain/trace"
 )
@@ -31,14 +32,38 @@ type RAGChatUseCase struct {
 	Prices             llm.PriceTable
 	Traces             trace.Store
 	Tokenizer          *tokenizer.Tokenizer
+	Prompts            prompt.Store
 	ContextTokenBudget int
 }
 
-func NewRAGChatUseCase(search *SearchUseCase, router *llm.Router, prices llm.PriceTable, traces trace.Store, tok *tokenizer.Tokenizer) *RAGChatUseCase {
+// NewRAGChatUseCase builds a RAGChatUseCase. prompts may be nil (tests,
+// or a caller that doesn't need the registry) — systemPrompt then always
+// falls back to DefaultRAGSystemPrompt.
+func NewRAGChatUseCase(search *SearchUseCase, router *llm.Router, prices llm.PriceTable, traces trace.Store, tok *tokenizer.Tokenizer, prompts prompt.Store) *RAGChatUseCase {
 	return &RAGChatUseCase{
-		Search: search, Router: router, Prices: prices, Traces: traces, Tokenizer: tok,
+		Search: search, Router: router, Prices: prices, Traces: traces, Tokenizer: tok, Prompts: prompts,
 		ContextTokenBudget: defaultContextTokenBudget,
 	}
+}
+
+// systemPrompt resolves the RAG pipeline's current instructions from the
+// Prompt Registry's active version, falling back to
+// DefaultRAGSystemPrompt if the registry isn't available or hasn't been
+// seeded yet — this is what makes "activate v2" change behavior without
+// a code change (docs/ROADMAP.md W6), while staying fail-soft.
+func (u *RAGChatUseCase) systemPrompt(ctx context.Context) string {
+	if u.Prompts == nil {
+		return DefaultRAGSystemPrompt
+	}
+	p, err := u.Prompts.GetPromptByName(ctx, RAGPromptName)
+	if err != nil {
+		return DefaultRAGSystemPrompt
+	}
+	v, err := u.Prompts.GetActiveVersion(ctx, p.ID)
+	if err != nil {
+		return DefaultRAGSystemPrompt
+	}
+	return v.Content
 }
 
 // RAGStreamEvent mirrors ChatStreamEvent but carries the Citations used
@@ -76,7 +101,7 @@ func (u *RAGChatUseCase) ChatStream(ctx context.Context, knowledgeBaseID, alias,
 	}
 
 	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: ragSystemPrompt},
+		{Role: llm.RoleSystem, Content: u.systemPrompt(ctx)},
 		{Role: llm.RoleUser, Content: buildRAGUserMessage(contextText, question)},
 	}
 

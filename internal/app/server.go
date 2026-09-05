@@ -49,7 +49,11 @@ func (a *App) Serve() error {
 	reranker := llmrerank.New(router, "cheap")
 	search := usecase.NewSearchUseCase(vectorSearcher, keywordSearcher, embedder, reranker, traces)
 
-	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok)
+	promptStore := sqlite.NewPromptStore(a.DB)
+	if err := seedDefaultPrompts(context.Background(), promptStore); err != nil {
+		return fmt.Errorf("seeding default prompts: %w", err)
+	}
+	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok, promptStore)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
@@ -59,6 +63,8 @@ func (a *App) Serve() error {
 		Ingest:    ingest,
 		Search:    search,
 		RAGChat:   ragChat,
+		Prompts:   promptStore,
+		Traces:    traces,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

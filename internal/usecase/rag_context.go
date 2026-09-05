@@ -58,7 +58,16 @@ func buildContext(results []retrieval.Result, tok *tokenizer.Tokenizer, budgetTo
 	return chunks, sb.String()
 }
 
-const ragSystemPrompt = `You are a helpful assistant answering questions using ONLY the numbered
+// RAGPromptName is the Prompt Registry entry the RAG pipeline reads its
+// system prompt from (docs/ROADMAP.md W6). App bootstrap seeds its v1
+// content to DefaultRAGSystemPrompt so a fresh install behaves exactly
+// as it did before the registry existed.
+const RAGPromptName = "rag_system"
+
+// DefaultRAGSystemPrompt is the seed content for RAGPromptName's v1, and
+// the fallback RAGChatUseCase uses if the registry has no active version
+// yet (e.g. a database that predates bootstrap seeding it).
+const DefaultRAGSystemPrompt = `You are a helpful assistant answering questions using ONLY the numbered
 context blocks provided by the user. Cite every factual claim with the
 matching bracketed number (e.g. [1], [2]) right after the claim. If the
 context doesn't contain the answer, say you don't know rather than

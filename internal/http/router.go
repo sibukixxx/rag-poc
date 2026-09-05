@@ -11,6 +11,8 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/domain/prompt"
+	"github.com/sibukixxx/rag-poc/internal/domain/trace"
 	"github.com/sibukixxx/rag-poc/internal/http/handler"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -26,6 +28,8 @@ type Deps struct {
 	Ingest    *usecase.IngestUseCase
 	Search    *usecase.SearchUseCase
 	RAGChat   *usecase.RAGChatUseCase
+	Prompts   prompt.Store
+	Traces    trace.Store
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -39,6 +43,8 @@ func NewRouter(deps Deps) http.Handler {
 	health := handler.NewHealthHandler(deps.DB, deps.Version)
 	chat := handler.NewChatHandler(deps.Chat)
 	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search, deps.RAGChat)
+	prompts := handler.NewPromptHandler(deps.Prompts)
+	traces := handler.NewTraceHandler(deps.Traces)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", health.Check)
@@ -49,6 +55,13 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
 		r.Post("/knowledge-bases/{id}/search", kb.Search)
 		r.Post("/knowledge-bases/{id}/chat", kb.Chat)
+		r.Post("/prompts", prompts.Create)
+		r.Get("/prompts", prompts.List)
+		r.Get("/prompts/{id}/versions", prompts.ListVersions)
+		r.Post("/prompts/{id}/versions", prompts.CreateVersion)
+		r.Post("/prompts/{id}/activate", prompts.Activate)
+		r.Get("/traces", traces.List)
+		r.Get("/traces/{id}", traces.Get)
 	})
 
 	r.Handle("/*", staticHandler())

@@ -97,11 +97,37 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   質問→引用チップ表示→クリックで本文展開、を実演。既存の平文チャット/
   Documents/Searchタブの回帰も無し。単体テスト全緑）
 
-### W6: Prompt Registry + Trace UI
-- prompts / prompt_versions CRUD + UI（バージョン一覧・diff）
-- RAG パイプラインが prompt version を参照する形に変更
-- Trace 一覧 / 詳細 UI（span ツリー、レイテンシ・コスト内訳）
-- **完了条件**: prompt を v2 に切り替えて挙動が変わり、Trace で全過程を追える
+### W6: Prompt Registry + Trace UI ✅ 完了
+- `internal/domain/prompt` + `internal/adapter/sqlite/prompt_store.go`: `prompts`/`prompt_versions`
+  テーブル（migration 0005）。`CreateVersion`は自動採番（1始まり）し、**最初の1件だけ自動的に
+  active化**、2件目以降は明示的な`SetActiveVersion`が必要（誤って新バージョンがいきなり
+  本番投入されるのを防ぐ）
+- API: `POST/GET /api/v1/prompts`, `GET/POST /api/v1/prompts/:id/versions`,
+  `POST /api/v1/prompts/:id/activate`
+- `internal/usecase/rag_chat.go`: system prompt を Prompt Registry の active version から
+  都度取得する形に変更（`RAGChatUseCase.systemPrompt`）。レジストリ未設定/未シードでも
+  `DefaultRAGSystemPrompt` にフォールバックする fail-soft 設計
+- `internal/app/prompts.go`: `forgeai serve` 起動時に `rag_system` プロンプトのv1を
+  （旧ハードコード文言と同一内容で）自動シード。既存インストールの挙動を変えずに
+  レジストリへ移行できる
+- Trace: `GET /api/v1/traces`（一覧）/ `GET /api/v1/traces/:id`（trace + spans）。
+  span同士に親子関係は無いため「span ツリー」はv0.1では時系列フラットリストに簡略化
+- UI: 新規 Prompts タブ（プロンプト作成、バージョン一覧、`diff`パッケージによる
+  隣接バージョンの差分表示、ワンクリックでのactivate）。新規 Traces タブ
+  （trace一覧→クリックでspan内訳＝kind/duration/tokens/cost/statusを表示）
+- **完了条件**: prompt を v2 に切り替えて挙動が変わり、Trace で全過程を追える → 確認済み
+  （モックサーバの system prompt に応じて応答を分岐させ、v1では通常の日本語回答、
+  v2（"PIRATE_MODE"）に`activate`で切り替えた直後の呼び出しから応答が変化することを
+  **コード再デプロイなしで** curl 実証。Trace一覧/詳細APIで rag_chat/search/ingest:embed
+  各traceとそのspan内訳（tokens/cost/status）を取得できることも確認。ブラウザ(Playwright)
+  でもPromptsタブでのバージョン作成・diff表示・activate、Traces タブでの一覧→詳細展開を
+  確認。全Go単体テスト緑（`TestRAGChatUsesActivePromptVersionAndReactsToSwitch`が
+  この完了条件そのものを検証）
+- **既知の積み残し**（W6スコープ外、次回対応）: `SearchUseCase`（W4実装）のembed/retrieve/
+  rerank spanは token数・costが未記録（`llm.Embedder`がusageを返さない設計のため、
+  ingestion側のように`Tokenizer.Count`で概算する対応が必要）。Trace UIで実際に
+  search系traceのcostが¥0固定で表示されることをE2E確認時に発見。SearchUseCaseの
+  コンストラクタ変更が複数箇所に波及するため、W6の変更範囲としては見送り
 
 ### W7: Golden Dataset + Retrieval 評価
 - datasets / dataset_cases、JSON / CSV インポート（UI + CLI）

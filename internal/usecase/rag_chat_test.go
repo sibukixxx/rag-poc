@@ -33,7 +33,7 @@ func TestRAGChatStreamAttachesCitationsOnDone(t *testing.T) {
 		t.Fatalf("tokenizer.New: %v", err)
 	}
 
-	ragUC := usecase.NewRAGChatUseCase(searchUC, router, testPrices(), traces, tok)
+	ragUC := usecase.NewRAGChatUseCase(searchUC, router, testPrices(), traces, tok, nil)
 	result, err := ragUC.ChatStream(context.Background(), "kb-1", "normal", "What is the return policy?", false)
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
@@ -90,7 +90,7 @@ func TestRAGChatStreamNoContextWhenNoResults(t *testing.T) {
 		t.Fatalf("tokenizer.New: %v", err)
 	}
 
-	ragUC := usecase.NewRAGChatUseCase(searchUC, router, testPrices(), newMemTraceStore(), tok)
+	ragUC := usecase.NewRAGChatUseCase(searchUC, router, testPrices(), newMemTraceStore(), tok, nil)
 	result, err := ragUC.ChatStream(context.Background(), "kb-1", "normal", "anything", false)
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
@@ -119,7 +119,7 @@ func TestRAGChatStreamPropagatesSearchError(t *testing.T) {
 		t.Fatalf("tokenizer.New: %v", err)
 	}
 
-	ragUC := usecase.NewRAGChatUseCase(searchUC, router, testPrices(), newMemTraceStore(), tok)
+	ragUC := usecase.NewRAGChatUseCase(searchUC, router, testPrices(), newMemTraceStore(), tok, nil)
 	if _, err := ragUC.ChatStream(context.Background(), "kb-1", "normal", "q", false); err == nil {
 		t.Fatal("expected an error when retrieval fails")
 	}
@@ -133,7 +133,7 @@ func TestRAGChatStreamUnknownAlias(t *testing.T) {
 		t.Fatalf("tokenizer.New: %v", err)
 	}
 
-	ragUC := usecase.NewRAGChatUseCase(searchUC, llm.NewRouter(), testPrices(), newMemTraceStore(), tok)
+	ragUC := usecase.NewRAGChatUseCase(searchUC, llm.NewRouter(), testPrices(), newMemTraceStore(), tok, nil)
 	if _, err := ragUC.ChatStream(context.Background(), "kb-1", "nonexistent", "q", false); err == nil {
 		t.Fatal("expected an error for an unknown alias")
 	}
