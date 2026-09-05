@@ -1,0 +1,61 @@
+{
+  "cases": [
+    { "query": "返品はいつまで可能ですか？", "expected_filenames": ["returns.md"] },
+    { "query": "返品の手順を教えてください", "expected_filenames": ["returns.md"] },
+    { "query": "返金にはどのくらいの期間がかかりますか？", "expected_filenames": ["returns.md"] },
+    { "query": "セール品は返品できますか？", "expected_filenames": ["returns.md"] },
+    { "query": "返品の送料は誰が負担しますか？", "expected_filenames": ["returns.md"] },
+    { "query": "サイズ違いの交換はできますか？", "expected_filenames": ["returns.md"] },
+    { "query": "開封済みの化粧品は返品できますか？", "expected_filenames": ["returns.md"] },
+
+    { "query": "注文してから届くまで何日かかりますか？", "expected_filenames": ["shipping.md"] },
+    { "query": "送料はいくらですか？", "expected_filenames": ["shipping.md"] },
+    { "query": "送料無料になる条件はありますか？", "expected_filenames": ["shipping.md"] },
+    { "query": "配送業者はどこを使っていますか？", "expected_filenames": ["shipping.md"] },
+    { "query": "荷物の追跡はできますか？", "expected_filenames": ["shipping.md"] },
+    { "query": "海外への発送はしていますか？", "expected_filenames": ["shipping.md"] },
+    { "query": "不在で受け取れなかった荷物はどうなりますか？", "expected_filenames": ["shipping.md"] },
+
+    { "query": "どんな支払い方法が使えますか？", "expected_filenames": ["payment.md"] },
+    { "query": "クレジットカードの分割払いはできますか？", "expected_filenames": ["payment.md"] },
+    { "query": "代金引換の手数料はいくらですか？", "expected_filenames": ["payment.md"] },
+    { "query": "コンビニ払いはできますか？", "expected_filenames": ["payment.md"] },
+    { "query": "決済エラーが出た場合はどうすればいいですか？", "expected_filenames": ["payment.md"] },
+    { "query": "二重決済されてしまった場合の対応は？", "expected_filenames": ["payment.md"] },
+
+    { "query": "アカウント登録の方法を教えてください", "expected_filenames": ["account.md"] },
+    { "query": "パスワードを忘れてしまいました", "expected_filenames": ["account.md"] },
+    { "query": "登録メールアドレスは変更できますか？", "expected_filenames": ["account.md"] },
+    { "query": "退会するにはどうすればいいですか？", "expected_filenames": ["account.md"] },
+    { "query": "二段階認証は設定できますか？", "expected_filenames": ["account.md"] },
+    { "query": "Googleアカウントでログインできますか？", "expected_filenames": ["account.md"] },
+
+    { "query": "家電の保証期間はどのくらいですか？", "expected_filenames": ["warranty.md"] },
+    { "query": "落下による故障は保証されますか？", "expected_filenames": ["warranty.md"] },
+    { "query": "修理はどうやって申し込みますか？", "expected_filenames": ["warranty.md"] },
+    { "query": "修理にはどのくらいの期間がかかりますか？", "expected_filenames": ["warranty.md"] },
+    { "query": "延長保証はありますか？", "expected_filenames": ["warranty.md"] },
+    { "query": "保証期間を過ぎた場合は修理してもらえますか？", "expected_filenames": ["warranty.md"] },
+
+    { "query": "どんな商品を取り扱っていますか？", "expected_filenames": ["products.md"] },
+    { "query": "在庫状況はどこで確認できますか？", "expected_filenames": ["products.md"] },
+    { "query": "再入荷の通知は受け取れますか？", "expected_filenames": ["products.md"] },
+    { "query": "クーポンは併用できますか？", "expected_filenames": ["products.md"] },
+    { "query": "商品レビューは投稿できますか？", "expected_filenames": ["products.md"] },
+    { "query": "アウトドア用品は扱っていますか？", "expected_filenames": ["products.md"] },
+
+    { "query": "サポートへの問い合わせ方法を教えてください", "expected_filenames": ["contact.md"] },
+    { "query": "電話サポートの受付時間は？", "expected_filenames": ["contact.md"] },
+    { "query": "問い合わせの返信にはどのくらいかかりますか？", "expected_filenames": ["contact.md"] },
+    { "query": "法人での注文について相談したいです", "expected_filenames": ["contact.md"] },
+    { "query": "商品に不具合があった場合はどこに連絡すればいいですか？", "expected_filenames": ["contact.md"] },
+    { "query": "チャットサポートは土日も対応していますか？", "expected_filenames": ["contact.md"] },
+
+    { "query": "注文後にキャンセルはできますか？", "expected_filenames": ["faq.md"] },
+    { "query": "注文内容を後から変更できますか？", "expected_filenames": ["faq.md"] },
+    { "query": "ポイントの有効期限はありますか？", "expected_filenames": ["faq.md"] },
+    { "query": "会員登録に費用はかかりますか？", "expected_filenames": ["faq.md"] },
+    { "query": "ギフトラッピングはできますか？", "expected_filenames": ["faq.md"] },
+    { "query": "領収書は発行してもらえますか？", "expected_filenames": ["faq.md", "payment.md"] }
+  ]
+}

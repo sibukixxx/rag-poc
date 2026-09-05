@@ -129,11 +129,42 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   search系traceのcostが¥0固定で表示されることをE2E確認時に発見。SearchUseCaseの
   コンストラクタ変更が複数箇所に波及するため、W6の変更範囲としては見送り
 
-### W7: Golden Dataset + Retrieval 評価
-- datasets / dataset_cases、JSON / CSV インポート（UI + CLI）
-- Evaluation Runner（非同期 job）: Recall@K / Precision@K / MRR / Hit Rate
-- `examples/` に日本語サンプル文書 + 50問 Golden Dataset を作る（実データ整備も工数）
-- **完了条件**: `forgeai eval run demo-golden` で Retrieval Hit Rate が出る
+### W7: Golden Dataset + Retrieval 評価 ✅ 完了
+- `internal/domain/eval` + `internal/adapter/sqlite/eval_store.go`: `datasets`/`dataset_cases`/
+  `evaluation_runs`/`evaluation_results` テーブル（migration 0006）。`Dataset`は1つの
+  knowledge base に紐づき、`Case`は expected_filenames（文書ID ではなく **filename** で
+  期待文書を保持）を持つ。再取り込みで document ID が変わっても golden dataset が
+  壊れないようにするための設計判断
+- JSON（`{"cases":[{query, expected_filenames}]}` or 配列そのまま）/ CSV（`query,
+  expected_filenames` ヘッダ、複数ファイル名は`|`区切り）インポートを共通パーサ
+  （`internal/usecase/dataset_import.go`）としてHTTP/CLI両方から利用
+- `internal/usecase/evaluate.go`: `EvaluationUseCase` が dataset の各 case を
+  `SearchUseCase`（本番と同じ Hybrid Search）に通し、文書名ベースで
+  Recall@K / Precision@K / MRR(reciprocal rank) / Hit Rate を計算。1ケースの
+  検索失敗は fail-soft（そのケースを0点扱いにして残り49問の評価は継続）
+- API: `POST/GET /api/v1/datasets`, `POST/GET /api/v1/datasets/:id/cases`,
+  `POST /api/v1/evaluations`（`CreateRun`即座に返し、`Execute`はgoroutineで
+  バックグラウンド実行 = 非同期 job）, `GET /api/v1/evaluations/:id`（進捗+結果),
+  `GET /api/v1/evaluations?dataset_id=`（run一覧）
+- CLI: `forgeai ingest <dir> -kb <slug>`（ディレクトリ内ファイルをまとめて取り込み。
+  HTTPアップロード無しでデモを完結させるためW7で追加）、
+  `forgeai eval import -kb <slug> <dataset-name> <file.json|csv>`,
+  `forgeai eval run [-top-k N] [-rerank] <dataset-name>`（同期実行し
+  Recall@K/Precision@K/MRR/Hit Rateを標準出力に表示）
+- UI: 新規 Eval タブ（dataset作成、cases インポート、top_k/rerank指定でのrun実行、
+  run履歴テーブル）
+- `examples/docs/`: 架空ECショップのサポート文書8本（返品/配送/支払い/アカウント/
+  保証/商品/問い合わせ/FAQ）+ `examples/golden-dataset.json`（50問、日本語）
+- **完了条件**: `forgeai eval run demo-golden` で Retrieval Hit Rate が出る → 確認済み
+  （モックサーバで `forgeai ingest ./examples/docs -kb demo` →
+  `forgeai eval import -kb demo demo-golden ./examples/golden-dataset.json` →
+  `forgeai eval run demo-golden` で Recall@K 1.000 / Hit Rate 1.000 / MRR 0.409 を確認。
+  HTTP API 経由でも同じ dataset に対して非同期 run を作成→ポーリングで `done` 到達を確認、
+  CSRFガードが新規POSTルートにも効いていることを確認。ブラウザ(Playwright)でも
+  EvalタブのRun履歴表示とRun実行ボタンの動作を確認。全Go単体テスト緑）
+- **既知の積み残し**（W7スコープ外）: この smoke test はモック埋め込み（内容に依らず
+  ほぼ固定ベクトル）を使っており、Recall/Hit Rateの高さは主にFTS5キーワード検索の
+  貢献による。実LLM/埋め込みでの評価はローカル環境での再検証が必要
 
 ### W8: LLM Judge 評価
 - Judge（alias: judge、judge プロンプトもバージョン管理）

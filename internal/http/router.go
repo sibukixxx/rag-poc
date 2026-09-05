@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/eval"
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
 	"github.com/sibukixxx/rag-poc/internal/domain/prompt"
 	"github.com/sibukixxx/rag-poc/internal/domain/trace"
@@ -24,6 +25,10 @@ import (
 const (
 	maxJSONBody   = 1 << 20  // 1 MiB: chat and KB-create bodies
 	maxUploadBody = 32 << 20 // 32 MiB: one document upload
+	// maxDatasetImportBody is bigger than maxJSONBody/maxUploadBody's JSON
+	// case: a 50+ question golden dataset (JSON or CSV) is still small,
+	// but bigger than a typical chat/search request.
+	maxDatasetImportBody = 4 << 20 // 4 MiB
 	// maxInflight bounds concurrent requests (each ingest/chat can be
 	// CPU- and provider-cost-heavy).
 	maxInflight = 8
@@ -42,6 +47,8 @@ type Deps struct {
 	RAGChat   *usecase.RAGChatUseCase
 	Prompts   prompt.Store
 	Traces    trace.Store
+	Datasets  eval.Store
+	Eval      *usecase.EvaluationUseCase
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -58,6 +65,7 @@ func NewRouter(deps Deps) http.Handler {
 	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search, deps.RAGChat)
 	prompts := handler.NewPromptHandler(deps.Prompts)
 	traces := handler.NewTraceHandler(deps.Traces)
+	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(denyCrossSite)
@@ -78,6 +86,13 @@ func NewRouter(deps Deps) http.Handler {
 		r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/activate", prompts.Activate)
 		r.Get("/traces", traces.List)
 		r.Get("/traces/{id}", traces.Get)
+		r.With(limitBody(maxJSONBody)).Post("/datasets", evaluations.CreateDataset)
+		r.Get("/datasets", evaluations.ListDatasets)
+		r.With(limitBody(maxDatasetImportBody)).Post("/datasets/{id}/cases", evaluations.ImportCases)
+		r.Get("/datasets/{id}/cases", evaluations.ListCases)
+		r.With(limitBody(maxJSONBody)).Post("/evaluations", evaluations.CreateEvaluation)
+		r.Get("/evaluations", evaluations.ListEvaluations)
+		r.Get("/evaluations/{id}", evaluations.GetEvaluation)
 	})
 
 	r.Handle("/*", noDirListing(staticHandler()))

@@ -55,6 +55,12 @@ func (a *App) Serve() error {
 	}
 	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok, promptStore)
 
+	// Golden Dataset + Retrieval evaluation (docs/ROADMAP.md W7). Reuses
+	// the same SearchUseCase a real query would go through, so a run's
+	// metrics reflect production retrieval behavior exactly.
+	datasets := sqlite.NewEvalStore(a.DB)
+	evalUC := usecase.NewEvaluationUseCase(search, datasets, traces)
+
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
 		Version:   Version,
@@ -65,6 +71,8 @@ func (a *App) Serve() error {
 		RAGChat:   ragChat,
 		Prompts:   promptStore,
 		Traces:    traces,
+		Datasets:  datasets,
+		Eval:      evalUC,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

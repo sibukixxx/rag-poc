@@ -70,7 +70,7 @@ echo "sk-..." | ./dist/forgeai secret set openai
 
 ### 5. Open the UI
 
-Visit http://localhost:8080 for four tabs:
+Visit http://localhost:8080 for five tabs:
 
 **Chat** — pick an alias (cheap / normal / judge) and chat; each reply
 shows tokens and cost. Every call is recorded as a Trace+Span in SQLite.
@@ -90,6 +90,12 @@ base and shows each hit's score, filename, and page.
 **Prompts** — the RAG chat's system prompt lives here, not in code.
 Write a new version, diff it against the previous one, and activate it —
 the very next RAG chat call uses it, no redeploy needed.
+
+**Eval** — create a Golden Dataset scoped to a knowledge base, import its
+cases (JSON or CSV, `query` + `expected_filenames`), and run them through
+the same Hybrid Search a real query uses. Each run reports Recall@K,
+Precision@K, MRR, and Hit Rate, scored by filename match. See
+[examples/](examples/) for a ready-to-run 50-question Japanese sample.
 
 **Traces** — every chat, RAG chat, search, and ingest call is recorded
 here with its spans (kind, latency, tokens, cost, status), so you can see
@@ -177,6 +183,10 @@ export FORGEAI_OPENAI_API_KEY=sk-...
   ベクトル+キーワードのハイブリッド検索を単独実行可能
 - **Prompts** — RAG チャットのシステムプロンプトをコード変更なしで編集・
   バージョン管理・切り替え（diff 表示付き）
+- **Eval** — ナレッジベースに紐づく Golden Dataset を作成し、ケース
+  （query + expected_filenames）を JSON/CSV でインポート。実際の検索と同じ
+  Hybrid Search で評価を実行し、Recall@K / Precision@K / MRR / Hit Rate を表示
+  （日本語50問のサンプルは [examples/](examples/) 参照）
 - **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
   （種別・レイテンシ・トークン・コスト・状態）で確認可能
 

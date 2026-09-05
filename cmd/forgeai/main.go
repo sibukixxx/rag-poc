@@ -11,12 +11,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/app"
+	"github.com/sibukixxx/rag-poc/internal/domain/eval"
+	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
 func main() {
@@ -34,6 +38,10 @@ func main() {
 		cmdInit(os.Args[2:])
 	case "secret":
 		cmdSecret(os.Args[2:])
+	case "ingest":
+		cmdIngest(os.Args[2:])
+	case "eval":
+		cmdEval(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -57,6 +65,15 @@ Usage:
                                    land in shell history or ps output.
   forgeai secret [-config path] delete <name>
                                    Remove a stored secret.
+  forgeai ingest [-config path] -kb <slug> <dir>
+                                   Ingest every supported file directly under <dir>
+                                   into knowledge base <slug> (created if missing).
+  forgeai eval import [-config path] -kb <slug> <dataset-name> <file.json|file.csv>
+                                   Create (or reuse) a Golden Dataset scoped to
+                                   knowledge base <slug> and import its cases.
+  forgeai eval run [-config path] [-top-k N] [-rerank] <dataset-name>
+                                   Run a dataset's cases through Hybrid Search and
+                                   print Recall@K / Precision@K / MRR / Hit Rate.
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`)
@@ -211,6 +228,223 @@ func cmdSecret(args []string) {
 		fmt.Fprintf(os.Stderr, "forgeai secret: unknown subcommand %q\n", sub)
 		os.Exit(1)
 	}
+}
+
+// cmdIngest ingests every supported file directly under a directory into a
+// knowledge base, using the same IngestUseCase the HTTP upload endpoint
+// uses. It exists so the acceptance flow in docs/V0.1_SPEC.md §9
+// (`forgeai ingest ./examples/docs --kb demo`) doesn't require a running
+// server plus manual curl uploads.
+func cmdIngest(args []string) {
+	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	kbSlug := fs.String("kb", "", "knowledge base slug (created if it doesn't exist)")
+	fs.Parse(args)
+	rest := fs.Args()
+
+	if *kbSlug == "" {
+		fmt.Fprintln(os.Stderr, "forgeai ingest: -kb is required")
+		os.Exit(1)
+	}
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "forgeai ingest: expected a directory argument")
+		os.Exit(1)
+	}
+	dir := rest[0]
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: reading %s: %v\n", dir, err)
+		os.Exit(1)
+	}
+
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+
+	kb, err := a.Knowledge().EnsureKnowledgeBase(context.Background(), *kbSlug, *kbSlug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+
+	ingest, err := a.Ingest()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+
+	failures := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "forgeai: reading %s: %v\n", path, err)
+			failures++
+			continue
+		}
+		doc, err := ingest.IngestFile(context.Background(), kb.ID, entry.Name(), "", data)
+		if err != nil && doc == nil {
+			fmt.Printf("%-30s FAILED   %v\n", entry.Name(), err)
+			failures++
+			continue
+		}
+		if doc.Status == knowledge.DocumentStatusFailed {
+			fmt.Printf("%-30s FAILED   %s\n", entry.Name(), doc.Error)
+			failures++
+			continue
+		}
+		fmt.Printf("%-30s ready    %d chunks\n", entry.Name(), doc.ChunkCount)
+	}
+
+	if failures > 0 {
+		os.Exit(1)
+	}
+}
+
+func cmdEval(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "forgeai eval: expected a subcommand (import, run)")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "import":
+		cmdEvalImport(args[1:])
+	case "run":
+		cmdEvalRun(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "forgeai eval: unknown subcommand %q\n", args[0])
+		os.Exit(1)
+	}
+}
+
+// cmdEvalImport creates (or reuses) a Golden Dataset scoped to a knowledge
+// base and imports its cases from a JSON or CSV file
+// (docs/ROADMAP.md W7: "JSON / CSV インポート（UI + CLI）").
+func cmdEvalImport(args []string) {
+	fs := flag.NewFlagSet("eval import", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	kbSlug := fs.String("kb", "", "knowledge base slug the dataset's cases are scoped to")
+	fs.Parse(args)
+	rest := fs.Args()
+
+	if *kbSlug == "" {
+		fmt.Fprintln(os.Stderr, "forgeai eval import: -kb is required")
+		os.Exit(1)
+	}
+	if len(rest) < 2 {
+		fmt.Fprintln(os.Stderr, "forgeai eval import: expected <dataset-name> <file.json|file.csv>")
+		os.Exit(1)
+	}
+	datasetName, path := rest[0], rest[1]
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: reading %s: %v\n", path, err)
+		os.Exit(1)
+	}
+
+	var cases []eval.Case
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json":
+		cases, err = usecase.ParseDatasetCasesJSON(data)
+	case ".csv":
+		cases, err = usecase.ParseDatasetCasesCSV(data)
+	default:
+		fmt.Fprintf(os.Stderr, "forgeai eval import: unsupported file extension %q (expected .json or .csv)\n", filepath.Ext(path))
+		os.Exit(1)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+
+	kb, err := a.Knowledge().EnsureKnowledgeBase(context.Background(), *kbSlug, *kbSlug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+
+	datasets, _ := a.Evaluation()
+	ds, err := datasets.EnsureDataset(context.Background(), datasetName, kb.ID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	created, err := datasets.AddCases(context.Background(), ds.ID, cases)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("forgeai: imported %d case(s) into dataset %q (kb: %s)\n", len(created), datasetName, *kbSlug)
+}
+
+// cmdEvalRun runs a dataset's cases through Hybrid Search synchronously
+// and prints the aggregate Retrieval metrics
+// (docs/ROADMAP.md W7 completion: "forgeai eval run demo-golden で
+// Retrieval Hit Rate が出る").
+func cmdEvalRun(args []string) {
+	fs := flag.NewFlagSet("eval run", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	topK := fs.Int("top-k", 0, "top_k passed to Search (defaults to SearchUseCase's default)")
+	rerank := fs.Bool("rerank", false, "enable LLM listwise rerank")
+	fs.Parse(args)
+	rest := fs.Args()
+
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "forgeai eval run: expected <dataset-name>")
+		os.Exit(1)
+	}
+	datasetName := rest[0]
+
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+
+	datasets, evalUC := a.Evaluation()
+	ds, err := datasets.GetDatasetByName(context.Background(), datasetName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: dataset %q not found (import it first with `forgeai eval import`)\n", datasetName)
+		os.Exit(1)
+	}
+
+	run, err := evalUC.CreateRun(context.Background(), ds.ID, *topK, *rerank)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	if err := evalUC.Execute(context.Background(), run.ID); err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: evaluation run failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	final, err := datasets.GetRun(context.Background(), run.ID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("forgeai: eval run %s (dataset: %s, top_k: %d, rerank: %v)\n", final.ID, datasetName, final.TopK, final.Rerank)
+	fmt.Printf("  Recall@K:    %.3f\n", final.RecallAtK)
+	fmt.Printf("  Precision@K: %.3f\n", final.PrecisionAtK)
+	fmt.Printf("  MRR:         %.3f\n", final.MRR)
+	fmt.Printf("  Hit Rate:    %.3f\n", final.HitRate)
 }
 
 // readSecretValue reads one line from stdin. On an interactive terminal the
