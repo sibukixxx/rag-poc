@@ -59,7 +59,8 @@ func (a *App) Serve() error {
 	// the same SearchUseCase a real query would go through, so a run's
 	// metrics reflect production retrieval behavior exactly.
 	datasets := sqlite.NewEvalStore(a.DB)
-	evalUC := usecase.NewEvaluationUseCase(search, datasets, traces)
+	judge := usecase.NewLLMJudge(router, prices, traces, promptStore)
+	evalUC := usecase.NewEvaluationUseCase(search, ragChat, judge, datasets, traces)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,

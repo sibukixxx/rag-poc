@@ -95,10 +95,13 @@ the very next RAG chat call uses it, no redeploy needed.
 questions with known-correct answers — also called an eval set or a
 human-labeled test set; a yardstick for measuring quality, not training
 data) scoped to a knowledge base, import its cases (JSON or CSV, `query` +
-`expected_filenames`), and run them through the same Hybrid Search a real
-query uses. Each run reports Recall@K,
-Precision@K, MRR, and Hit Rate, scored by filename match. See
-[examples/](examples/) for a ready-to-run 50-question Japanese sample.
+`expected_filenames`, optionally `expected_answer`), and run them through
+the same Hybrid Search a real query uses. Each run reports Recall@K,
+Precision@K, MRR, and Hit Rate, scored by filename match. Turn on **LLM
+Judge** and each question is also answered through the RAG pipeline and
+graded by the `judge` alias for Correctness / Groundedness / Relevance
+(0–1) with a written reason; click a run to drill into low-scoring cases.
+See [examples/](examples/) for a ready-to-run 50-question Japanese sample.
 
 **Traces** — every chat, RAG chat, search, and ingest call is recorded
 here with its spans (kind, latency, tokens, cost, status), so you can see
@@ -190,8 +193,10 @@ export FORGEAI_OPENAI_API_KEY=sk-...
   少量の評価用データ。eval set / human-labeled test set とも呼ばれる。
   学習データではなく品質を測る「ものさし」）を作成し、ケース
   （query + expected_filenames）を JSON/CSV でインポート。実際の検索と同じ
-  Hybrid Search で評価を実行し、Recall@K / Precision@K / MRR / Hit Rate を表示
-  （日本語50問のサンプルは [examples/](examples/) 参照）
+  Hybrid Search で評価を実行し、Recall@K / Precision@K / MRR / Hit Rate を表示。
+  **LLM Judge** を有効にすると各質問に RAG で回答し、`judge` alias が
+  Correctness / Groundedness / Relevance（0〜1）と理由を採点。run をクリックすると
+  低スコアケースを理由付きで確認できる（日本語50問のサンプルは [examples/](examples/) 参照）
 - **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
   （種別・レイテンシ・トークン・コスト・状態）で確認可能
 

@@ -20,7 +20,7 @@ import (
 type memPromptStore struct {
 	mu       sync.Mutex
 	prompts  map[string]prompt.Prompt // by id
-	byName   map[string]string       // name -> id
+	byName   map[string]string        // name -> id
 	versions map[string][]prompt.Version
 }
 

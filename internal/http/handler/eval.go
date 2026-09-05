@@ -39,10 +39,11 @@ type caseDTO struct {
 	ID                string   `json:"id"`
 	Query             string   `json:"query"`
 	ExpectedFilenames []string `json:"expected_filenames"`
+	ExpectedAnswer    string   `json:"expected_answer,omitempty"`
 }
 
 func toCaseDTO(c eval.Case) caseDTO {
-	return caseDTO{ID: c.ID, Query: c.Query, ExpectedFilenames: c.ExpectedFilenames}
+	return caseDTO{ID: c.ID, Query: c.Query, ExpectedFilenames: c.ExpectedFilenames, ExpectedAnswer: c.ExpectedAnswer}
 }
 
 // CreateDataset handles POST /api/v1/datasets ({name, knowledge_base_id}).
@@ -187,10 +188,16 @@ type runDTO struct {
 	Error        string  `json:"error,omitempty"`
 	TopK         int     `json:"top_k"`
 	Rerank       bool    `json:"rerank"`
+	Judge        bool    `json:"judge"`
+	Alias        string  `json:"alias,omitempty"`
 	RecallAtK    float64 `json:"recall_at_k"`
 	PrecisionAtK float64 `json:"precision_at_k"`
 	MRR          float64 `json:"mrr"`
 	HitRate      float64 `json:"hit_rate"`
+	Correctness  float64 `json:"correctness"`
+	Groundedness float64 `json:"groundedness"`
+	Relevance    float64 `json:"relevance"`
+	CostUSD      float64 `json:"cost_usd"`
 	StartedAt    string  `json:"started_at"`
 	FinishedAt   *string `json:"finished_at,omitempty"`
 }
@@ -198,8 +205,10 @@ type runDTO struct {
 func toRunDTO(r eval.Run) runDTO {
 	dto := runDTO{
 		ID: r.ID, DatasetID: r.DatasetID, Status: string(r.Status), Error: r.Error,
-		TopK: r.TopK, Rerank: r.Rerank, RecallAtK: r.RecallAtK, PrecisionAtK: r.PrecisionAtK,
-		MRR: r.MRR, HitRate: r.HitRate, StartedAt: r.StartedAt.Format(time.RFC3339Nano),
+		TopK: r.TopK, Rerank: r.Rerank, Judge: r.Judge, Alias: r.Alias,
+		RecallAtK: r.RecallAtK, PrecisionAtK: r.PrecisionAtK, MRR: r.MRR, HitRate: r.HitRate,
+		Correctness: r.Correctness, Groundedness: r.Groundedness, Relevance: r.Relevance, CostUSD: r.CostUSD,
+		StartedAt: r.StartedAt.Format(time.RFC3339Nano),
 	}
 	if r.FinishedAt != nil {
 		s := r.FinishedAt.Format(time.RFC3339Nano)
@@ -210,23 +219,45 @@ func toRunDTO(r eval.Run) runDTO {
 
 type caseResultDTO struct {
 	CaseID             string   `json:"case_id"`
+	Query              string   `json:"query"`
+	ExpectedFilenames  []string `json:"expected_filenames"`
+	ExpectedAnswer     string   `json:"expected_answer,omitempty"`
 	RetrievedFilenames []string `json:"retrieved_filenames"`
 	RecallAtK          float64  `json:"recall_at_k"`
 	PrecisionAtK       float64  `json:"precision_at_k"`
 	ReciprocalRank     float64  `json:"reciprocal_rank"`
 	Hit                bool     `json:"hit"`
+	Answer             string   `json:"answer,omitempty"`
+	Correctness        float64  `json:"correctness"`
+	Groundedness       float64  `json:"groundedness"`
+	Relevance          float64  `json:"relevance"`
+	JudgeReason        string   `json:"judge_reason,omitempty"`
+	JudgeModel         string   `json:"judge_model,omitempty"`
+	JudgePromptVersion int      `json:"judge_prompt_version,omitempty"`
+	CostUSD            float64  `json:"cost_usd"`
+	DurationMS         int64    `json:"duration_ms"`
 	Error              string   `json:"error,omitempty"`
 }
 
-func toCaseResultDTO(r eval.CaseResult) caseResultDTO {
-	return caseResultDTO{
+// toCaseResultDTO joins the result with its case so the run detail view
+// can show the question and expectations next to the scores without a
+// second round-trip.
+func toCaseResultDTO(r eval.CaseResult, c *eval.Case) caseResultDTO {
+	dto := caseResultDTO{
 		CaseID: r.CaseID, RetrievedFilenames: r.RetrievedFilenames, RecallAtK: r.RecallAtK,
-		PrecisionAtK: r.PrecisionAtK, ReciprocalRank: r.ReciprocalRank, Hit: r.Hit, Error: r.Error,
+		PrecisionAtK: r.PrecisionAtK, ReciprocalRank: r.ReciprocalRank, Hit: r.Hit,
+		Answer: r.Answer, Correctness: r.Correctness, Groundedness: r.Groundedness, Relevance: r.Relevance,
+		JudgeReason: r.JudgeReason, JudgeModel: r.JudgeModel, JudgePromptVersion: r.JudgePromptVersion,
+		CostUSD: r.CostUSD, DurationMS: r.DurationMS, Error: r.Error,
 	}
+	if c != nil {
+		dto.Query, dto.ExpectedFilenames, dto.ExpectedAnswer = c.Query, c.ExpectedFilenames, c.ExpectedAnswer
+	}
+	return dto
 }
 
 // CreateEvaluation handles POST /api/v1/evaluations ({dataset_id, top_k,
-// rerank}). The run starts in the background (docs/V0.1_SPEC.md §6: "run
+// rerank, judge, alias}). The run starts in the background (docs/V0.1_SPEC.md §6: "run
 // 開始（非同期）") and the response carries just the pending run so the
 // caller can poll GetEvaluation for progress.
 func (h *EvalHandler) CreateEvaluation(w http.ResponseWriter, r *http.Request) {
@@ -234,6 +265,8 @@ func (h *EvalHandler) CreateEvaluation(w http.ResponseWriter, r *http.Request) {
 		DatasetID string `json:"dataset_id"`
 		TopK      int    `json:"top_k"`
 		Rerank    bool   `json:"rerank"`
+		Judge     bool   `json:"judge"`
+		Alias     string `json:"alias"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -248,7 +281,13 @@ func (h *EvalHandler) CreateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.eval.CreateRun(r.Context(), req.DatasetID, req.TopK, req.Rerank)
+	if len(req.Alias) > maxNameLen {
+		http.Error(w, "alias too long", http.StatusBadRequest)
+		return
+	}
+	run, err := h.eval.CreateRun(r.Context(), req.DatasetID, usecase.RunOptions{
+		TopK: req.TopK, Rerank: req.Rerank, Judge: req.Judge, Alias: req.Alias,
+	})
 	if err != nil {
 		internalError(w, "creating evaluation run", err)
 		return
@@ -283,9 +322,18 @@ func (h *EvalHandler) GetEvaluation(w http.ResponseWriter, r *http.Request) {
 		internalError(w, "loading evaluation results", err)
 		return
 	}
+	cases, err := h.datasets.ListCases(r.Context(), run.DatasetID)
+	if err != nil {
+		internalError(w, "loading dataset cases", err)
+		return
+	}
+	byID := make(map[string]*eval.Case, len(cases))
+	for i := range cases {
+		byID[cases[i].ID] = &cases[i]
+	}
 	out := make([]caseResultDTO, len(results))
 	for i, cr := range results {
-		out[i] = toCaseResultDTO(cr)
+		out[i] = toCaseResultDTO(cr, byID[cr.CaseID])
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"run": toRunDTO(*run), "results": out})

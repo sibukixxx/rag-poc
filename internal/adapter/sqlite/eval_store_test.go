@@ -47,7 +47,7 @@ func TestDatasetAndCasesRoundTrip(t *testing.T) {
 
 	cases := []eval.Case{
 		{Query: "返品規定について教えて", ExpectedFilenames: []string{"returns.md"}},
-		{Query: "配送にかかる日数は？", ExpectedFilenames: []string{"shipping.md", "faq.md"}},
+		{Query: "配送にかかる日数は？", ExpectedFilenames: []string{"shipping.md", "faq.md"}, ExpectedAnswer: "通常2〜4営業日で発送"},
 	}
 	created, err := store.AddCases(ctx, ds.ID, cases)
 	if err != nil {
@@ -69,6 +69,9 @@ func TestDatasetAndCasesRoundTrip(t *testing.T) {
 	}
 	if len(listed[1].ExpectedFilenames) != 2 || listed[1].ExpectedFilenames[0] != "shipping.md" {
 		t.Errorf("expected_filenames did not round-trip: %+v", listed[1].ExpectedFilenames)
+	}
+	if listed[1].ExpectedAnswer != "通常2〜4営業日で発送" {
+		t.Errorf("expected_answer did not round-trip: %q", listed[1].ExpectedAnswer)
 	}
 
 	all, err := store.ListDatasets(ctx)
@@ -93,7 +96,7 @@ func TestEvaluationRunAndCaseResultsRoundTrip(t *testing.T) {
 		t.Fatalf("AddCases: %v", err)
 	}
 
-	run := eval.Run{ID: "run-1", DatasetID: ds.ID, Status: eval.RunStatusPending, TopK: 10, Rerank: true, StartedAt: time.Now()}
+	run := eval.Run{ID: "run-1", DatasetID: ds.ID, Status: eval.RunStatusPending, TopK: 10, Rerank: true, Judge: true, Alias: "normal", StartedAt: time.Now()}
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -108,12 +111,16 @@ func TestEvaluationRunAndCaseResultsRoundTrip(t *testing.T) {
 	if !loaded.Rerank {
 		t.Error("expected Rerank to round-trip as true")
 	}
+	if !loaded.Judge || loaded.Alias != "normal" {
+		t.Errorf("expected Judge=true/Alias=normal to round-trip, got %+v", loaded)
+	}
 	if loaded.FinishedAt != nil {
 		t.Error("expected FinishedAt to be nil before the run finishes")
 	}
 
 	run.Status = eval.RunStatusDone
 	run.RecallAtK, run.PrecisionAtK, run.MRR, run.HitRate = 1, 1, 1, 1
+	run.Correctness, run.Groundedness, run.Relevance, run.CostUSD = 0.8, 0.9, 0.7, 0.0123
 	finished := run.StartedAt
 	run.FinishedAt = &finished
 	if err := store.UpdateRun(ctx, run); err != nil {
@@ -130,12 +137,21 @@ func TestEvaluationRunAndCaseResultsRoundTrip(t *testing.T) {
 	if loaded.HitRate != 1 {
 		t.Errorf("expected HitRate 1, got %v", loaded.HitRate)
 	}
+	if loaded.Correctness != 0.8 || loaded.Groundedness != 0.9 || loaded.Relevance != 0.7 || loaded.CostUSD != 0.0123 {
+		t.Errorf("judge metrics did not round-trip: %+v", loaded)
+	}
 	if loaded.FinishedAt == nil {
 		t.Error("expected FinishedAt to be set after the run finishes")
 	}
 
 	if err := store.CreateCaseResults(ctx, []eval.CaseResult{
-		{RunID: "run-1", CaseID: cases[0].ID, RetrievedFilenames: []string{"a.md", "b.md"}, RecallAtK: 1, PrecisionAtK: 0.5, ReciprocalRank: 1, Hit: true},
+		{
+			RunID: "run-1", CaseID: cases[0].ID, RetrievedFilenames: []string{"a.md", "b.md"},
+			RecallAtK: 1, PrecisionAtK: 0.5, ReciprocalRank: 1, Hit: true,
+			Answer: "30日以内 [1]", Correctness: 1, Groundedness: 0.5, Relevance: 0.75,
+			JudgeReason: "cites the right source", JudgeModel: "gpt-4o-mini", JudgePromptVersion: 1,
+			CostUSD: 0.001, DurationMS: 42,
+		},
 	}); err != nil {
 		t.Fatalf("CreateCaseResults: %v", err)
 	}
@@ -152,6 +168,12 @@ func TestEvaluationRunAndCaseResultsRoundTrip(t *testing.T) {
 	}
 	if len(results[0].RetrievedFilenames) != 2 || results[0].RetrievedFilenames[1] != "b.md" {
 		t.Errorf("retrieved_filenames did not round-trip: %+v", results[0].RetrievedFilenames)
+	}
+	r := results[0]
+	if r.Answer != "30日以内 [1]" || r.Correctness != 1 || r.Groundedness != 0.5 || r.Relevance != 0.75 ||
+		r.JudgeReason != "cites the right source" || r.JudgeModel != "gpt-4o-mini" || r.JudgePromptVersion != 1 ||
+		r.CostUSD != 0.001 || r.DurationMS != 42 {
+		t.Errorf("judge fields did not round-trip: %+v", r)
 	}
 
 	runs, err := store.ListRuns(ctx, ds.ID)

@@ -98,10 +98,10 @@ func (s *EvalStore) AddCases(ctx context.Context, datasetID string, cases []eval
 		c.ID = uuid.NewString()
 		c.DatasetID = datasetID
 		c.CreatedAt = time.Now()
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO dataset_cases (id, dataset_id, query, expected_filenames, created_at) VALUES (?, ?, ?, ?, ?)`,
-			c.ID, c.DatasetID, c.Query, string(expected), c.CreatedAt.Format(timeLayout),
-		)
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO dataset_cases (id, dataset_id, query, expected_filenames, expected_answer, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, c.ID, c.DatasetID, c.Query, string(expected), c.ExpectedAnswer, c.CreatedAt.Format(timeLayout))
 		if err != nil {
 			return nil, fmt.Errorf("inserting case %d: %w", i, err)
 		}
@@ -116,7 +116,7 @@ func (s *EvalStore) AddCases(ctx context.Context, datasetID string, cases []eval
 
 func (s *EvalStore) ListCases(ctx context.Context, datasetID string) ([]eval.Case, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, dataset_id, query, expected_filenames, created_at
+		SELECT id, dataset_id, query, expected_filenames, expected_answer, created_at
 		FROM dataset_cases WHERE dataset_id = ? ORDER BY created_at ASC
 	`, datasetID)
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *EvalStore) ListCases(ctx context.Context, datasetID string) ([]eval.Cas
 	for rows.Next() {
 		var c eval.Case
 		var createdAt, expected string
-		if err := rows.Scan(&c.ID, &c.DatasetID, &c.Query, &expected, &createdAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.DatasetID, &c.Query, &expected, &c.ExpectedAnswer, &createdAt); err != nil {
 			return nil, fmt.Errorf("scanning case: %w", err)
 		}
 		c.CreatedAt, _ = time.Parse(timeLayout, createdAt)
@@ -138,14 +138,43 @@ func (s *EvalStore) ListCases(ctx context.Context, datasetID string) ([]eval.Cas
 	return out, rows.Err()
 }
 
+const runColumns = `id, dataset_id, status, error, top_k, rerank, judge, alias,
+	recall_at_k, precision_at_k, mrr, hit_rate,
+	correctness, groundedness, relevance, cost_usd, started_at, finished_at`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRun(row rowScanner) (*eval.Run, error) {
+	var run eval.Run
+	var status, startedAt string
+	var finishedAt sql.NullString
+	var rerank, judge int
+	err := row.Scan(&run.ID, &run.DatasetID, &status, &run.Error, &run.TopK, &rerank, &judge, &run.Alias,
+		&run.RecallAtK, &run.PrecisionAtK, &run.MRR, &run.HitRate,
+		&run.Correctness, &run.Groundedness, &run.Relevance, &run.CostUSD, &startedAt, &finishedAt)
+	if err != nil {
+		return nil, err
+	}
+	run.Status = eval.RunStatus(status)
+	run.Rerank = rerank != 0
+	run.Judge = judge != 0
+	run.StartedAt, _ = time.Parse(timeLayout, startedAt)
+	if finishedAt.Valid {
+		t, _ := time.Parse(timeLayout, finishedAt.String)
+		run.FinishedAt = &t
+	}
+	return &run, nil
+}
+
 func (s *EvalStore) CreateRun(ctx context.Context, run eval.Run) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO evaluation_runs (
-			id, dataset_id, status, error, top_k, rerank,
-			recall_at_k, precision_at_k, mrr, hit_rate, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, run.ID, run.DatasetID, string(run.Status), run.Error, run.TopK, boolToInt(run.Rerank),
+		INSERT INTO evaluation_runs (`+runColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, run.ID, run.DatasetID, string(run.Status), run.Error, run.TopK, boolToInt(run.Rerank), boolToInt(run.Judge), run.Alias,
 		run.RecallAtK, run.PrecisionAtK, run.MRR, run.HitRate,
+		run.Correctness, run.Groundedness, run.Relevance, run.CostUSD,
 		run.StartedAt.Format(timeLayout), formatNullableTime(run.FinishedAt))
 	if err != nil {
 		return fmt.Errorf("creating evaluation run %s: %w", run.ID, err)
@@ -156,11 +185,12 @@ func (s *EvalStore) CreateRun(ctx context.Context, run eval.Run) error {
 func (s *EvalStore) UpdateRun(ctx context.Context, run eval.Run) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE evaluation_runs SET
-			status = ?, error = ?, recall_at_k = ?, precision_at_k = ?,
-			mrr = ?, hit_rate = ?, finished_at = ?
+			status = ?, error = ?, recall_at_k = ?, precision_at_k = ?, mrr = ?, hit_rate = ?,
+			correctness = ?, groundedness = ?, relevance = ?, cost_usd = ?, finished_at = ?
 		WHERE id = ?
-	`, string(run.Status), run.Error, run.RecallAtK, run.PrecisionAtK,
-		run.MRR, run.HitRate, formatNullableTime(run.FinishedAt), run.ID)
+	`, string(run.Status), run.Error, run.RecallAtK, run.PrecisionAtK, run.MRR, run.HitRate,
+		run.Correctness, run.Groundedness, run.Relevance, run.CostUSD,
+		formatNullableTime(run.FinishedAt), run.ID)
 	if err != nil {
 		return fmt.Errorf("updating evaluation run %s: %w", run.ID, err)
 	}
@@ -168,38 +198,19 @@ func (s *EvalStore) UpdateRun(ctx context.Context, run eval.Run) error {
 }
 
 func (s *EvalStore) GetRun(ctx context.Context, id string) (*eval.Run, error) {
-	var run eval.Run
-	var status, startedAt string
-	var finishedAt sql.NullString
-	var rerank int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, dataset_id, status, error, top_k, rerank,
-		       recall_at_k, precision_at_k, mrr, hit_rate, started_at, finished_at
-		FROM evaluation_runs WHERE id = ?
-	`, id).Scan(&run.ID, &run.DatasetID, &status, &run.Error, &run.TopK, &rerank,
-		&run.RecallAtK, &run.PrecisionAtK, &run.MRR, &run.HitRate, &startedAt, &finishedAt)
+	run, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM evaluation_runs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("evaluation run %s: %w", id, sql.ErrNoRows)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading evaluation run %s: %w", id, err)
 	}
-	run.Status = eval.RunStatus(status)
-	run.Rerank = rerank != 0
-	run.StartedAt, _ = time.Parse(timeLayout, startedAt)
-	if finishedAt.Valid {
-		t, _ := time.Parse(timeLayout, finishedAt.String)
-		run.FinishedAt = &t
-	}
-	return &run, nil
+	return run, nil
 }
 
 func (s *EvalStore) ListRuns(ctx context.Context, datasetID string) ([]eval.Run, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, dataset_id, status, error, top_k, rerank,
-		       recall_at_k, precision_at_k, mrr, hit_rate, started_at, finished_at
-		FROM evaluation_runs WHERE dataset_id = ? ORDER BY started_at DESC
-	`, datasetID)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+runColumns+` FROM evaluation_runs WHERE dataset_id = ? ORDER BY started_at DESC`, datasetID)
 	if err != nil {
 		return nil, fmt.Errorf("listing evaluation runs for dataset %s: %w", datasetID, err)
 	}
@@ -207,22 +218,11 @@ func (s *EvalStore) ListRuns(ctx context.Context, datasetID string) ([]eval.Run,
 
 	var out []eval.Run
 	for rows.Next() {
-		var run eval.Run
-		var status, startedAt string
-		var finishedAt sql.NullString
-		var rerank int
-		if err := rows.Scan(&run.ID, &run.DatasetID, &status, &run.Error, &run.TopK, &rerank,
-			&run.RecallAtK, &run.PrecisionAtK, &run.MRR, &run.HitRate, &startedAt, &finishedAt); err != nil {
+		run, err := scanRun(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning evaluation run: %w", err)
 		}
-		run.Status = eval.RunStatus(status)
-		run.Rerank = rerank != 0
-		run.StartedAt, _ = time.Parse(timeLayout, startedAt)
-		if finishedAt.Valid {
-			t, _ := time.Parse(timeLayout, finishedAt.String)
-			run.FinishedAt = &t
-		}
-		out = append(out, run)
+		out = append(out, *run)
 	}
 	return out, rows.Err()
 }
@@ -248,10 +248,14 @@ func (s *EvalStore) CreateCaseResults(ctx context.Context, results []eval.CaseRe
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO evaluation_results (
 				id, run_id, case_id, retrieved_filenames,
-				recall_at_k, precision_at_k, reciprocal_rank, hit, error
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				recall_at_k, precision_at_k, reciprocal_rank, hit,
+				answer, correctness, groundedness, relevance, judge_reason,
+				judge_model, judge_prompt_version, cost_usd, duration_ms, error
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, r.ID, r.RunID, r.CaseID, string(retrieved),
-			r.RecallAtK, r.PrecisionAtK, r.ReciprocalRank, boolToInt(r.Hit), r.Error)
+			r.RecallAtK, r.PrecisionAtK, r.ReciprocalRank, boolToInt(r.Hit),
+			r.Answer, r.Correctness, r.Groundedness, r.Relevance, r.JudgeReason,
+			r.JudgeModel, r.JudgePromptVersion, r.CostUSD, r.DurationMS, r.Error)
 		if err != nil {
 			return fmt.Errorf("inserting case result %d: %w", i, err)
 		}
@@ -265,7 +269,10 @@ func (s *EvalStore) CreateCaseResults(ctx context.Context, results []eval.CaseRe
 
 func (s *EvalStore) ListCaseResults(ctx context.Context, runID string) ([]eval.CaseResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, run_id, case_id, retrieved_filenames, recall_at_k, precision_at_k, reciprocal_rank, hit, error
+		SELECT id, run_id, case_id, retrieved_filenames,
+		       recall_at_k, precision_at_k, reciprocal_rank, hit,
+		       answer, correctness, groundedness, relevance, judge_reason,
+		       judge_model, judge_prompt_version, cost_usd, duration_ms, error
 		FROM evaluation_results WHERE run_id = ?
 	`, runID)
 	if err != nil {
@@ -278,7 +285,10 @@ func (s *EvalStore) ListCaseResults(ctx context.Context, runID string) ([]eval.C
 		var r eval.CaseResult
 		var retrieved string
 		var hit int
-		if err := rows.Scan(&r.ID, &r.RunID, &r.CaseID, &retrieved, &r.RecallAtK, &r.PrecisionAtK, &r.ReciprocalRank, &hit, &r.Error); err != nil {
+		if err := rows.Scan(&r.ID, &r.RunID, &r.CaseID, &retrieved,
+			&r.RecallAtK, &r.PrecisionAtK, &r.ReciprocalRank, &hit,
+			&r.Answer, &r.Correctness, &r.Groundedness, &r.Relevance, &r.JudgeReason,
+			&r.JudgeModel, &r.JudgePromptVersion, &r.CostUSD, &r.DurationMS, &r.Error); err != nil {
 			return nil, fmt.Errorf("scanning case result: %w", err)
 		}
 		r.Hit = hit != 0

@@ -71,9 +71,12 @@ Usage:
   forgeai eval import [-config path] -kb <slug> <dataset-name> <file.json|file.csv>
                                    Create (or reuse) a Golden Dataset scoped to
                                    knowledge base <slug> and import its cases.
-  forgeai eval run [-config path] [-top-k N] [-rerank] <dataset-name>
+  forgeai eval run [-config path] [-top-k N] [-rerank] [-judge [-alias name]] <dataset-name>
                                    Run a dataset's cases through Hybrid Search and
                                    print Recall@K / Precision@K / MRR / Hit Rate.
+                                   With -judge, also answer each case via RAG and have
+                                   the LLM Judge score Correctness / Groundedness /
+                                   Relevance, listing low-scoring cases with reasons.
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`)
@@ -378,7 +381,11 @@ func cmdEvalImport(args []string) {
 		os.Exit(1)
 	}
 
-	datasets, _ := a.Evaluation()
+	datasets, _, err := a.Evaluation()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
 	ds, err := datasets.EnsureDataset(context.Background(), datasetName, kb.ID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
@@ -401,6 +408,8 @@ func cmdEvalRun(args []string) {
 	configPath := fs.String("config", "", "path to config YAML")
 	topK := fs.Int("top-k", 0, "top_k passed to Search (defaults to SearchUseCase's default)")
 	rerank := fs.Bool("rerank", false, "enable LLM listwise rerank")
+	judge := fs.Bool("judge", false, "also generate a RAG answer per case and score it with the LLM Judge")
+	alias := fs.String("alias", "", "LLM alias used to generate answers for -judge (default: normal)")
 	fs.Parse(args)
 	rest := fs.Args()
 
@@ -417,14 +426,20 @@ func cmdEvalRun(args []string) {
 	}
 	defer a.Close()
 
-	datasets, evalUC := a.Evaluation()
+	datasets, evalUC, err := a.Evaluation()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
 	ds, err := datasets.GetDatasetByName(context.Background(), datasetName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "forgeai: dataset %q not found (import it first with `forgeai eval import`)\n", datasetName)
 		os.Exit(1)
 	}
 
-	run, err := evalUC.CreateRun(context.Background(), ds.ID, *topK, *rerank)
+	run, err := evalUC.CreateRun(context.Background(), ds.ID, usecase.RunOptions{
+		TopK: *topK, Rerank: *rerank, Judge: *judge, Alias: *alias,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
 		os.Exit(1)
@@ -440,11 +455,71 @@ func cmdEvalRun(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("forgeai: eval run %s (dataset: %s, top_k: %d, rerank: %v)\n", final.ID, datasetName, final.TopK, final.Rerank)
-	fmt.Printf("  Recall@K:    %.3f\n", final.RecallAtK)
-	fmt.Printf("  Precision@K: %.3f\n", final.PrecisionAtK)
-	fmt.Printf("  MRR:         %.3f\n", final.MRR)
-	fmt.Printf("  Hit Rate:    %.3f\n", final.HitRate)
+	fmt.Printf("forgeai: eval run %s (dataset: %s, top_k: %d, rerank: %v, judge: %v)\n", final.ID, datasetName, final.TopK, final.Rerank, final.Judge)
+	fmt.Printf("  Recall@K:     %.3f\n", final.RecallAtK)
+	fmt.Printf("  Precision@K:  %.3f\n", final.PrecisionAtK)
+	fmt.Printf("  MRR:          %.3f\n", final.MRR)
+	fmt.Printf("  Hit Rate:     %.3f\n", final.HitRate)
+	if !final.Judge {
+		return
+	}
+	fmt.Printf("  Correctness:  %.3f\n", final.Correctness)
+	fmt.Printf("  Groundedness: %.3f\n", final.Groundedness)
+	fmt.Printf("  Relevance:    %.3f\n", final.Relevance)
+	fmt.Printf("  Cost:         $%.6f (alias: %s)\n", final.CostUSD, final.Alias)
+
+	// Low-scoring cases with the judge's reason: the W8 completion
+	// criterion is that these are readable right here, without the UI.
+	printLowScoringCases(datasets, ds.ID, final.ID)
+}
+
+// lowScoreThreshold is the score at or below which a judged case is
+// listed as needing attention.
+const lowScoreThreshold = 0.5
+
+func printLowScoringCases(datasets eval.Store, datasetID, runID string) {
+	cases, err := datasets.ListCases(context.Background(), datasetID)
+	if err != nil {
+		return
+	}
+	queries := make(map[string]string, len(cases))
+	for _, c := range cases {
+		queries[c.ID] = c.Query
+	}
+	results, err := datasets.ListCaseResults(context.Background(), runID)
+	if err != nil {
+		return
+	}
+
+	var low []eval.CaseResult
+	for _, r := range results {
+		if r.Error != "" || min(r.Correctness, r.Groundedness, r.Relevance) <= lowScoreThreshold {
+			low = append(low, r)
+		}
+	}
+	if len(low) == 0 {
+		fmt.Println("\n  All cases scored above", lowScoreThreshold, "on every dimension.")
+		return
+	}
+	fmt.Printf("\n  %d case(s) at or below %.1f (or errored):\n", len(low), lowScoreThreshold)
+	for _, r := range low {
+		fmt.Printf("\n  - %s\n", queries[r.CaseID])
+		if r.Error != "" {
+			fmt.Printf("    error: %s\n", r.Error)
+			continue
+		}
+		fmt.Printf("    correctness %.2f / groundedness %.2f / relevance %.2f\n", r.Correctness, r.Groundedness, r.Relevance)
+		fmt.Printf("    answer: %s\n", truncateRunes(r.Answer, 160))
+		fmt.Printf("    reason: %s\n", r.JudgeReason)
+	}
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(strings.ReplaceAll(s, "\n", " "))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
 }
 
 // readSecretValue reads one line from stdin. On an interactive terminal the

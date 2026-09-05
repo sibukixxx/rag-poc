@@ -498,3 +498,13 @@
   font-size: 0.95rem;
   margin: 0 0 8px;
 }
+
+.eval-case-detail td {
+  background: var(--assistant-bg);
+  font-size: 0.85rem;
+}
+
+.eval-case-detail p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+}

@@ -166,11 +166,45 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   ほぼ固定ベクトル）を使っており、Recall/Hit Rateの高さは主にFTS5キーワード検索の
   貢献による。実LLM/埋め込みでの評価はローカル環境での再検証が必要
 
-### W8: LLM Judge 評価
-- Judge（alias: judge、judge プロンプトもバージョン管理）
-- Correctness / Groundedness / Relevance + reason 保存
-- run 詳細 UI（ケース別スコア、失敗ケースのドリルダウン）
-- **完了条件**: 50問の judge 評価が完走し、低スコアケースの理由が読める
+### W8: LLM Judge 評価 ✅ 完了
+- `internal/usecase/judge.go`: `LLMJudge`。alias `judge` で Correctness / Groundedness /
+  Relevance（各 0.0–1.0）+ reason を JSON で返させ、コードフェンスや前置き付きの応答も
+  最初の `{...}` を抜いて許容。範囲外スコアは [0,1] にクランプ。rerank と違い
+  **fail-soft にしない**（パース失敗・API失敗は error として返す。判定不能を 0 点として
+  黙って集計するより「判定できなかった」と記録する方が評価として正直）
+- judge プロンプトは Prompt Registry の `rag_judge`（起動時に v1 をシード、F-11）。
+  各 `evaluation_results` 行が `judge_model` / `judge_prompt_version` を持つので
+  「judge を厳しくしたら数字が下がった」を後から追える
+- `RAGChatUseCase.Answer`: ChatStream の非ストリーミング版。評価用に本番と同じ
+  retrieval + 同じ registry プロンプト + 同じ alias で1回の Generate。判定用に
+  「モデルが実際に見た context 文字列」も返す
+- `EvaluationUseCase`: `RunOptions{TopK, Rerank, Judge, Alias}`。Judge 時は各ケースで
+  retrieval 採点 → `Answer` → `Judge` を実行し、per-case の answer / 3スコア / reason /
+  cost / latency を保存、run に平均スコアと合計コストを集計。1ケースの answer/judge
+  失敗は error として記録して残りを続行（W7 と同じ fail-soft）
+- migration 0007: `dataset_cases.expected_answer`（任意。無い場合は judge が context
+  との整合で correctness を判定）、`evaluation_runs` に judge/alias/3スコア/cost_usd、
+  `evaluation_results` に answer/3スコア/judge_reason/judge_model/judge_prompt_version/
+  cost_usd/duration_ms（W9 の P95 レイテンシ・コスト比較用に今から記録）
+- API: `POST /api/v1/evaluations` に `judge` / `alias`。`GET /api/v1/evaluations/:id` の
+  results に query / expected / answer / スコア / reason を同梱（run 詳細 UI が1往復で描ける）
+- CLI: `forgeai eval run -judge [-alias normal] <dataset>`。集計に加えて
+  **スコア 0.5 以下またはエラーのケースを answer + reason 付きで列挙**
+- UI: Eval タブの run 一覧に judge 列（Correct./Grounded./Relev./Cost）、run クリックで
+  ケース別テーブル、「Only failed / low-scoring cases」フィルタ、行クリックで
+  expected / retrieved / answer / judge reason を展開
+- `examples/golden-dataset.json` の 50 問すべてに `expected_answer` を追加
+- **完了条件**: 50問の judge 評価が完走し、低スコアケースの理由が読める → 確認済み
+  （judge 応答を返すモックサーバで `forgeai eval run -judge demo-golden-v2` が 50 問完走、
+  Correctness 0.690 / Groundedness 0.820 / Relevance 0.740 / Cost $0.00195 を集計し、
+  低スコア 15 件を reason 付きで列挙。既存 DB への migration 0007（ALTER TABLE）適用も
+  この run で確認。HTTP API で `judge:true` の非同期 run → done、Playwright で Eval タブ
+  から judge run 起動 → 詳細で 15 件フラグ → 1件展開で answer/reason 表示を確認。
+  Go 単体テスト全緑（judge パース/クランプ/エラー、judge run の集計とケース単位の
+  fail-soft を含む））
+- **既知の積み残し**: judge run は retrieval 採点用の Search と `Answer` 内の Search で
+  クエリ埋め込みを2回呼ぶ（top_k が違うため）。コスト影響は小さいが W9 以降で
+  結果を共有する形に寄せられる
 
 ### W9: Experiment 比較
 - run 間比較 API + UI（品質 / Groundedness / P95 レイテンシ / コスト、Winner 表示）

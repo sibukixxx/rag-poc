@@ -70,13 +70,13 @@ func (u *RAGChatUseCase) systemPrompt(ctx context.Context) string {
 // to ground the answer, populated on the terminal (Done) event once the
 // full response — and therefore the final cost — is known.
 type RAGStreamEvent struct {
-	Delta      string
-	Done       bool
-	Usage      llm.Usage
-	CostUSD    float64
-	Citations  []ContextChunk
-	NoContext  bool // true when the knowledge base had nothing to retrieve
-	Err        error
+	Delta     string
+	Done      bool
+	Usage     llm.Usage
+	CostUSD   float64
+	Citations []ContextChunk
+	NoContext bool // true when the knowledge base had nothing to retrieve
+	Err       error
 }
 
 type RAGStreamResult struct {
@@ -157,4 +157,76 @@ func (u *RAGChatUseCase) ChatStream(ctx context.Context, knowledgeBaseID, alias,
 	}()
 
 	return &RAGStreamResult{Events: out, TraceID: traceID}, nil
+}
+
+// RAGAnswer is the non-streaming result of Answer: the full answer plus
+// the context it was generated from, so a caller (the LLM Judge in W8)
+// can check the answer against exactly what the model saw.
+type RAGAnswer struct {
+	Content   string
+	Model     string
+	Usage     llm.Usage
+	CostUSD   float64
+	Citations []ContextChunk
+	Context   string // the numbered context text passed to the model
+	TraceID   string
+}
+
+// Answer is ChatStream's synchronous counterpart for evaluation: same
+// retrieval, same prompt, same alias, but a single Generate call whose
+// full content is returned at once (docs/ROADMAP.md W8).
+func (u *RAGChatUseCase) Answer(ctx context.Context, knowledgeBaseID, alias, question string, rerank bool) (*RAGAnswer, error) {
+	results, err := u.Search.Search(ctx, knowledgeBaseID, question, retrieval.Options{TopK: defaultRAGTopK, Rerank: rerank})
+	if err != nil {
+		return nil, fmt.Errorf("retrieving context: %w", err)
+	}
+	contextChunks, contextText := buildContext(results, u.Tokenizer, u.ContextTokenBudget)
+
+	provider, model, err := u.Router.Resolve(alias)
+	if err != nil {
+		return nil, err
+	}
+
+	traceID := uuid.NewString()
+	start := time.Now()
+	resp, err := provider.Generate(ctx, llm.GenerateRequest{
+		Model: model,
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: u.systemPrompt(ctx)},
+			{Role: llm.RoleUser, Content: buildRAGUserMessage(contextText, question)},
+		},
+		MaxTokens: defaultMaxTokens,
+	})
+	duration := time.Since(start)
+
+	status, errMsg := trace.StatusOK, ""
+	var usage llm.Usage
+	var costUSD float64
+	if err != nil {
+		status, errMsg = trace.StatusError, err.Error()
+	} else {
+		usage = resp.Usage
+		costUSD, _, _ = u.Prices.Cost(model, usage)
+	}
+	if u.Traces != nil {
+		bg := context.Background()
+		_ = u.Traces.CreateTrace(bg, trace.Trace{
+			ID: traceID, Name: "rag_answer:" + alias, StartedAt: start,
+			DurationMS: duration.Milliseconds(), Status: status, CostUSD: costUSD,
+		})
+		_ = u.Traces.CreateSpan(bg, trace.Span{
+			ID: uuid.NewString(), TraceID: traceID, Kind: trace.SpanKindLLM, Name: "rag_answer.generate",
+			StartedAt: start, DurationMS: duration.Milliseconds(), Model: model,
+			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CostUSD: costUSD,
+			Status: status, Error: errMsg,
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &RAGAnswer{
+		Content: resp.Content, Model: model, Usage: usage, CostUSD: costUSD,
+		Citations: contextChunks, Context: contextText, TraceID: traceID,
+	}, nil
 }

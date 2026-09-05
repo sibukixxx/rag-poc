@@ -22,13 +22,17 @@ type Dataset struct {
 	CreatedAt       time.Time
 }
 
-// Case is one golden question: a query and the filenames a good retrieval
-// result should surface.
+// Case is one golden question: a query, the filenames a good retrieval
+// result should surface, and (optionally) a reference answer the LLM
+// Judge scores Correctness against (W8). Without a reference answer the
+// judge still scores Groundedness/Relevance, and scores Correctness by
+// consistency with the retrieved context.
 type Case struct {
 	ID                string
 	DatasetID         string
 	Query             string
 	ExpectedFilenames []string
+	ExpectedAnswer    string
 	CreatedAt         time.Time
 }
 
@@ -41,9 +45,10 @@ const (
 	RunStatusFailed  RunStatus = "failed"
 )
 
-// Run is one execution of a Dataset's cases against a particular search
-// configuration (top_k, rerank). Aggregate metrics are the mean of each
-// case's own metric (docs/V0.1_SPEC.md §8).
+// Run is one execution of a Dataset's cases against a particular
+// configuration: search (top_k, rerank) and, when Judge is set, answer
+// generation (Alias) + LLM judging. Aggregate metrics are the mean of
+// each case's own metric (docs/V0.1_SPEC.md §8).
 type Run struct {
 	ID           string
 	DatasetID    string
@@ -51,15 +56,23 @@ type Run struct {
 	Error        string
 	TopK         int
 	Rerank       bool
+	Judge        bool   // also generate a RAG answer per case and judge it
+	Alias        string // LLM alias used to generate answers when Judge is set
 	RecallAtK    float64
 	PrecisionAtK float64
 	MRR          float64
 	HitRate      float64
+	Correctness  float64 // judge metrics: mean over judged cases, 0.0-1.0
+	Groundedness float64
+	Relevance    float64
+	CostUSD      float64 // total LLM cost of the run (answers + judgments)
 	StartedAt    time.Time
 	FinishedAt   *time.Time
 }
 
-// CaseResult is one case's outcome within a Run.
+// CaseResult is one case's outcome within a Run. The retrieval fields are
+// always populated; the answer/judge fields only when the run had Judge
+// set.
 type CaseResult struct {
 	ID                 string
 	RunID              string
@@ -69,6 +82,15 @@ type CaseResult struct {
 	PrecisionAtK       float64
 	ReciprocalRank     float64
 	Hit                bool
+	Answer             string
+	Correctness        float64
+	Groundedness       float64
+	Relevance          float64
+	JudgeReason        string
+	JudgeModel         string
+	JudgePromptVersion int
+	CostUSD            float64
+	DurationMS         int64
 	Error              string
 }
 

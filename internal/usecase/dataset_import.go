@@ -16,6 +16,9 @@ import (
 type datasetCaseJSON struct {
 	Query             string   `json:"query"`
 	ExpectedFilenames []string `json:"expected_filenames"`
+	// ExpectedAnswer is optional; when present the LLM Judge scores
+	// Correctness against it (W8).
+	ExpectedAnswer string `json:"expected_answer"`
 }
 
 // ParseDatasetCasesJSON accepts either a bare JSON array of cases or an
@@ -35,7 +38,7 @@ func ParseDatasetCasesJSON(data []byte) ([]eval.Case, error) {
 
 	cases := make([]eval.Case, 0, len(raw))
 	for i, c := range raw {
-		validated, err := validateCase(c.Query, c.ExpectedFilenames)
+		validated, err := validateCase(c.Query, c.ExpectedFilenames, c.ExpectedAnswer)
 		if err != nil {
 			return nil, fmt.Errorf("case %d: %w", i, err)
 		}
@@ -48,9 +51,10 @@ func ParseDatasetCasesJSON(data []byte) ([]eval.Case, error) {
 }
 
 // ParseDatasetCasesCSV expects a header row with "query" and
-// "expected_filenames" columns; expected_filenames holds one or more
-// filenames separated by "|" (a plain comma would collide with the CSV
-// delimiter itself, e.g. "returns.md|faq.md").
+// "expected_filenames" columns (plus an optional "expected_answer");
+// expected_filenames holds one or more filenames separated by "|" (a
+// plain comma would collide with the CSV delimiter itself, e.g.
+// "returns.md|faq.md").
 func ParseDatasetCasesCSV(data []byte) ([]eval.Case, error) {
 	r := csv.NewReader(strings.NewReader(string(data)))
 	r.FieldsPerRecord = -1
@@ -63,13 +67,15 @@ func ParseDatasetCasesCSV(data []byte) ([]eval.Case, error) {
 		return nil, fmt.Errorf("reading CSV header: %w", err)
 	}
 
-	queryCol, expectedCol := -1, -1
+	queryCol, expectedCol, answerCol := -1, -1, -1
 	for i, h := range header {
 		switch strings.ToLower(strings.TrimSpace(h)) {
 		case "query":
 			queryCol = i
 		case "expected_filenames", "expected_documents":
 			expectedCol = i
+		case "expected_answer":
+			answerCol = i
 		}
 	}
 	if queryCol == -1 || expectedCol == -1 {
@@ -95,7 +101,11 @@ func ParseDatasetCasesCSV(data []byte) ([]eval.Case, error) {
 				filenames = append(filenames, f)
 			}
 		}
-		validated, err := validateCase(record[queryCol], filenames)
+		answer := ""
+		if answerCol >= 0 && answerCol < len(record) {
+			answer = record[answerCol]
+		}
+		validated, err := validateCase(record[queryCol], filenames, answer)
 		if err != nil {
 			return nil, fmt.Errorf("row %d: %w", row, err)
 		}
@@ -107,7 +117,7 @@ func ParseDatasetCasesCSV(data []byte) ([]eval.Case, error) {
 	return cases, nil
 }
 
-func validateCase(query string, expectedFilenames []string) (eval.Case, error) {
+func validateCase(query string, expectedFilenames []string, expectedAnswer string) (eval.Case, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return eval.Case{}, fmt.Errorf("query must not be empty")
@@ -121,5 +131,5 @@ func validateCase(query string, expectedFilenames []string) (eval.Case, error) {
 	if len(filenames) == 0 {
 		return eval.Case{}, fmt.Errorf("expected_filenames must contain at least one filename")
 	}
-	return eval.Case{Query: query, ExpectedFilenames: filenames}, nil
+	return eval.Case{Query: query, ExpectedFilenames: filenames, ExpectedAnswer: strings.TrimSpace(expectedAnswer)}, nil
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/extractor"
@@ -38,9 +39,10 @@ func (a *App) Ingest() (*usecase.IngestUseCase, error) {
 // import|run`. It builds the same SearchUseCase (Hybrid Search + rerank)
 // a real query goes through, so a run's metrics reflect production
 // retrieval behavior exactly.
-func (a *App) Evaluation() (eval.Store, *usecase.EvaluationUseCase) {
+func (a *App) Evaluation() (eval.Store, *usecase.EvaluationUseCase, error) {
 	secrets, _ := a.Secrets()
 	router := BuildRouter(a.Config.LLM, secrets)
+	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	embedder := BuildEmbedder(a.Config.Embedding, secrets)
 
@@ -49,6 +51,20 @@ func (a *App) Evaluation() (eval.Store, *usecase.EvaluationUseCase) {
 	reranker := llmrerank.New(router, "cheap")
 	search := usecase.NewSearchUseCase(vectorSearcher, keywordSearcher, embedder, reranker, traces)
 
+	// Judge runs generate answers through the same RAG pipeline (and the
+	// same registry prompts) the server uses, so CLI and UI runs are
+	// comparable.
+	tok, err := tokenizer.New()
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading tokenizer: %w", err)
+	}
+	promptStore := sqlite.NewPromptStore(a.DB)
+	if err := seedDefaultPrompts(context.Background(), promptStore); err != nil {
+		return nil, nil, fmt.Errorf("seeding default prompts: %w", err)
+	}
+	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok, promptStore)
+	judge := usecase.NewLLMJudge(router, prices, traces, promptStore)
+
 	datasets := sqlite.NewEvalStore(a.DB)
-	return datasets, usecase.NewEvaluationUseCase(search, datasets, traces)
+	return datasets, usecase.NewEvaluationUseCase(search, ragChat, judge, datasets, traces), nil
 }

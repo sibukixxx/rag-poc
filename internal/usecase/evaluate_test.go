@@ -128,9 +128,9 @@ func TestEvaluationUseCaseComputesAggregateRetrievalMetrics(t *testing.T) {
 	embedder := &fakeEmbedder{vector: []float32{1, 0}}
 	search := usecase.NewSearchUseCase(emptyVectorSearcher{}, kw, embedder, nil, nil)
 
-	uc := usecase.NewEvaluationUseCase(search, store, nil)
+	uc := usecase.NewEvaluationUseCase(search, nil, nil, store, nil)
 
-	run, err := uc.CreateRun(context.Background(), dataset.ID, 10, false)
+	run, err := uc.CreateRun(context.Background(), dataset.ID, usecase.RunOptions{TopK: 10})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -179,9 +179,9 @@ func TestEvaluationUseCaseFailsRunWhenDatasetHasNoCases(t *testing.T) {
 	store := newMemEvalStore(dataset, nil)
 	embedder := &fakeEmbedder{vector: []float32{1}}
 	search := usecase.NewSearchUseCase(emptyVectorSearcher{}, &fakeQueryKeywordSearcher{}, embedder, nil, nil)
-	uc := usecase.NewEvaluationUseCase(search, store, nil)
+	uc := usecase.NewEvaluationUseCase(search, nil, nil, store, nil)
 
-	run, err := uc.CreateRun(context.Background(), dataset.ID, 10, false)
+	run, err := uc.CreateRun(context.Background(), dataset.ID, usecase.RunOptions{TopK: 10})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

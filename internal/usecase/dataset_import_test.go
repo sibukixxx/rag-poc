@@ -9,7 +9,7 @@ import (
 func TestParseDatasetCasesJSONBareArray(t *testing.T) {
 	data := []byte(`[
 		{"query": "返品規定について教えて", "expected_filenames": ["returns.md"]},
-		{"query": "配送にかかる日数は？", "expected_filenames": ["shipping.md", "faq.md"]}
+		{"query": "配送にかかる日数は？", "expected_filenames": ["shipping.md", "faq.md"], "expected_answer": "2〜4営業日"}
 	]`)
 	cases, err := usecase.ParseDatasetCasesJSON(data)
 	if err != nil {
@@ -20,6 +20,9 @@ func TestParseDatasetCasesJSONBareArray(t *testing.T) {
 	}
 	if cases[1].ExpectedFilenames[1] != "faq.md" {
 		t.Errorf("unexpected expected_filenames: %+v", cases[1].ExpectedFilenames)
+	}
+	if cases[1].ExpectedAnswer != "2〜4営業日" || cases[0].ExpectedAnswer != "" {
+		t.Errorf("expected_answer not parsed: %+v", cases)
 	}
 }
 
@@ -42,9 +45,9 @@ func TestParseDatasetCasesJSONRejectsMissingExpectedFilenames(t *testing.T) {
 }
 
 func TestParseDatasetCasesCSV(t *testing.T) {
-	data := []byte("query,expected_filenames\n" +
-		"返品規定について教えて,returns.md\n" +
-		"配送にかかる日数は？,shipping.md|faq.md\n")
+	data := []byte("query,expected_filenames,expected_answer\n" +
+		"返品規定について教えて,returns.md,到着後30日以内\n" +
+		"配送にかかる日数は？,shipping.md|faq.md,\n")
 	cases, err := usecase.ParseDatasetCasesCSV(data)
 	if err != nil {
 		t.Fatalf("ParseDatasetCasesCSV: %v", err)
@@ -54,6 +57,9 @@ func TestParseDatasetCasesCSV(t *testing.T) {
 	}
 	if len(cases[1].ExpectedFilenames) != 2 || cases[1].ExpectedFilenames[0] != "shipping.md" {
 		t.Errorf("unexpected expected_filenames: %+v", cases[1].ExpectedFilenames)
+	}
+	if cases[0].ExpectedAnswer != "到着後30日以内" || cases[1].ExpectedAnswer != "" {
+		t.Errorf("expected_answer column not parsed: %+v", cases)
 	}
 }
 
