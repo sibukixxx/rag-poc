@@ -77,24 +77,19 @@ This checks your LLM connection, database setup, and master key.
 ./dist/forgeai serve
 ```
 
-The UI will be at `http://localhost:8080`.
+Visit http://localhost:8080 to access the interface.
 
 ### 5. Use ForgeAI
 
-**Chat Tab**
-- Select an LLM alias (cheap / normal / judge)
-- Chat interactively
-- See token usage and API costs per message
-- Full conversation history stored in SQLite
+The UI provides four main features:
 
-**Knowledge Tab**
-- Create a knowledge base
-- Upload files: PDF, TXT, MD, HTML, CSV, JSON
-- Documents are automatically:
-  - Chunked with token-aware splitting
-  - Embedded via your configured model
-  - Deduplicated (identical re-uploads cost zero API calls)
-- Query documents via semantic search
+**Chat** — Select an LLM alias (cheap / normal / judge) and chat interactively. Each reply shows token counts and API costs, recorded as Traces in SQLite. Optionally select a Knowledge Base to enable Hybrid Search retrieval with inline citations (`[1]`, `[2]`, etc.).
+
+**Knowledge** — Create knowledge bases and upload files (PDF, TXT, MD, HTML, CSV, JSON). Documents are automatically chunked, normalized, and embedded. Identical re-uploads reuse cached embeddings (zero API cost). A **Search** sub-tab runs Hybrid Search (semantic + keyword, merged by RRF) with optional LLM reranking.
+
+**Prompts** — Edit the RAG chat's system prompt without code changes. Write a version, diff it against the previous one, and activate it — the very next chat call uses it, no redeploy needed.
+
+**Traces** — View every chat, search, and ingest call with detailed spans (type, latency, tokens, cost, status). Debug prompt and config changes by comparing traces side-by-side.
 
 ## Development
 
@@ -213,8 +208,15 @@ export FORGEAI_OPENAI_API_KEY=sk-...
 
 ブラウザで http://localhost:8080 を開くと：
 
-- **Chat** — LLM とチャット。トークン数とコストを表示
-- **Knowledge** — PDF など文書をアップロード。意味検索で質問に答える
+- **Chat** — LLM とチャット。トークン数とコストを表示。ナレッジベースを選ぶと
+  Hybrid Search で検索した根拠を引用付き（`[1]`, `[2]`...）で回答
+- **Knowledge** — PDF など文書をアップロード。チャンク分割・正規化・埋め込みは
+  自動、同一内容の再アップロードは embedding を再生成しない。**Search** サブタブで
+  ベクトル+キーワードのハイブリッド検索を単独実行可能
+- **Prompts** — RAG チャットのシステムプロンプトをコード変更なしで編集・
+  バージョン管理・切り替え（diff 表示付き）
+- **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
+  （種別・レイテンシ・トークン・コスト・状態）で確認可能
 
 ### デプロイ
 

@@ -13,6 +13,7 @@ function Knowledge() {
   const [documents, setDocuments] = useState([])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const [subTab, setSubTab] = useState('documents')
 
   const loadKnowledgeBases = useCallback(async () => {
     const resp = await fetch('/api/v1/knowledge-bases')
@@ -117,43 +118,132 @@ function Knowledge() {
           </button>
         </form>
 
-        <label className="upload-button">
-          {uploading ? 'Uploading…' : 'Upload document'}
-          <input type="file" onChange={uploadFile} disabled={!selectedId || uploading} hidden />
-        </label>
+        <nav className="sub-tabs">
+          <button className={`sub-tab ${subTab === 'documents' ? 'active' : ''}`} onClick={() => setSubTab('documents')}>
+            Documents
+          </button>
+          <button className={`sub-tab ${subTab === 'search' ? 'active' : ''}`} onClick={() => setSubTab('search')}>
+            Search
+          </button>
+        </nav>
+
+        {subTab === 'documents' && (
+          <label className="upload-button">
+            {uploading ? 'Uploading…' : 'Upload document'}
+            <input type="file" onChange={uploadFile} disabled={!selectedId || uploading} hidden />
+          </label>
+        )}
       </div>
 
       {error && <p className="kb-error">{error}</p>}
 
-      <main className="kb-documents">
-        {!selectedId && <p className="empty">Create or select a knowledge base to upload documents.</p>}
-        {selectedId && documents.length === 0 && (
-          <p className="empty">No documents yet. Upload a PDF, TXT, MD, HTML, CSV, or JSON file.</p>
-        )}
-        {documents.length > 0 && (
-          <table className="doc-table">
-            <thead>
-              <tr>
-                <th>Filename</th>
-                <th>Status</th>
-                <th>Chunks</th>
-                <th>Size</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((d) => (
-                <tr key={d.id} className={`doc-row doc-${d.status}`}>
-                  <td>{d.filename}</td>
-                  <td title={d.error || ''}>{STATUS_LABEL[d.status] || d.status}</td>
-                  <td>{d.chunk_count}</td>
-                  <td>{(d.size_bytes / 1024).toFixed(1)} KB</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </main>
+      {subTab === 'documents' ? (
+        <DocumentsPanel selectedId={selectedId} documents={documents} />
+      ) : (
+        <SearchPanel selectedId={selectedId} onError={(msg) => setError(msg)} />
+      )}
     </div>
+  )
+}
+
+function DocumentsPanel({ selectedId, documents }) {
+  return (
+    <main className="kb-documents">
+      {!selectedId && <p className="empty">Create or select a knowledge base to upload documents.</p>}
+      {selectedId && documents.length === 0 && (
+        <p className="empty">No documents yet. Upload a PDF, TXT, MD, HTML, CSV, or JSON file.</p>
+      )}
+      {documents.length > 0 && (
+        <table className="doc-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Status</th>
+              <th>Chunks</th>
+              <th>Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {documents.map((d) => (
+              <tr key={d.id} className={`doc-row doc-${d.status}`}>
+                <td>{d.filename}</td>
+                <td title={d.error || ''}>{STATUS_LABEL[d.status] || d.status}</td>
+                <td>{d.chunk_count}</td>
+                <td>{(d.size_bytes / 1024).toFixed(1)} KB</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </main>
+  )
+}
+
+function SearchPanel({ selectedId, onError }) {
+  const [query, setQuery] = useState('')
+  const [rerank, setRerank] = useState(false)
+  const [results, setResults] = useState(null)
+  const [searching, setSearching] = useState(false)
+
+  async function runSearch(e) {
+    e.preventDefault()
+    if (!query.trim() || !selectedId) return
+
+    setSearching(true)
+    onError('')
+    try {
+      const resp = await fetch(`/api/v1/knowledge-bases/${selectedId}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, top_k: 10, rerank }),
+      })
+      const body = await resp.json().catch(() => null)
+      if (!resp.ok) throw new Error((body && body.error) || `HTTP ${resp.status}`)
+      setResults(body.results || [])
+    } catch (err) {
+      onError(String(err.message || err))
+      setResults(null)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  return (
+    <main className="kb-search">
+      <form className="search-form" onSubmit={runSearch}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search this knowledge base (vector + keyword)"
+          disabled={!selectedId}
+        />
+        <label className="rerank-toggle">
+          <input type="checkbox" checked={rerank} onChange={(e) => setRerank(e.target.checked)} />
+          Rerank
+        </label>
+        <button type="submit" disabled={!selectedId || !query.trim() || searching}>
+          {searching ? 'Searching…' : 'Search'}
+        </button>
+      </form>
+
+      {!selectedId && <p className="empty">Select a knowledge base first.</p>}
+      {selectedId && results !== null && results.length === 0 && <p className="empty">No results.</p>}
+
+      {results && results.length > 0 && (
+        <ul className="search-results">
+          {results.map((r) => (
+            <li key={r.chunk_id} className="search-result">
+              <div className="search-result-meta">
+                <span className="search-result-file">{r.filename}</span>
+                {r.page != null && <span> · page {r.page}</span>}
+                <span className="search-result-score"> · score {r.score.toFixed(4)}</span>
+              </div>
+              <p className="search-result-text">{r.text}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </main>
   )
 }
 
