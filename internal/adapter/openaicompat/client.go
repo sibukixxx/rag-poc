@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -95,9 +96,13 @@ func (c *Client) newRequest(ctx context.Context, body chatRequest) (*http.Reques
 	return req, nil
 }
 
+// readAPIError logs the upstream URL and response body (which can contain
+// internal hostnames, org/project IDs, or a masked API key) server-side
+// only, and returns an error safe to show to API clients.
 func readAPIError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return fmt.Errorf("openaicompat: %s returned %d: %s", resp.Request.URL, resp.StatusCode, string(body))
+	log.Printf("openaicompat: %s returned %d: %s", resp.Request.URL, resp.StatusCode, string(body))
+	return fmt.Errorf("openaicompat: provider returned HTTP %d", resp.StatusCode)
 }
 
 func (c *Client) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {

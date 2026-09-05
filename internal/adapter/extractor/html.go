@@ -28,11 +28,17 @@ func (HTMLLoader) Load(_ context.Context, data []byte, _ knowledge.FileMeta) ([]
 		return nil, err
 	}
 
+	// Iterative depth-first walk with an explicit stack: x/net/html does not
+	// cap nesting depth, so a file of a few MB of "<div>" would overflow the
+	// goroutine stack with a recursive walk (a fatal, unrecoverable error).
 	var sb strings.Builder
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
+	stack := []*html.Node{doc}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
 		if n.Type == html.ElementNode && (n.DataAtom == atom.Script || n.DataAtom == atom.Style) {
-			return
+			continue
 		}
 		if n.Type == html.TextNode {
 			text := strings.TrimSpace(n.Data)
@@ -41,11 +47,11 @@ func (HTMLLoader) Load(_ context.Context, data []byte, _ knowledge.FileMeta) ([]
 				sb.WriteString("\n")
 			}
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
+		// Push children in reverse so they are visited in document order.
+		for c := n.LastChild; c != nil; c = c.PrevSibling {
+			stack = append(stack, c)
 		}
 	}
-	walk(doc)
 
 	return []knowledge.Page{{Text: sb.String()}}, nil
 }

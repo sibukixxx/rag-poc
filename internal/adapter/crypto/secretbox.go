@@ -49,18 +49,24 @@ func NewSecretBox(envVar string) (*SecretBox, error) {
 }
 
 // Seal encrypts plaintext and returns the ciphertext and the nonce used.
-func (b *SecretBox) Seal(plaintext []byte) (ciphertext, nonce []byte, err error) {
+//
+// aad (additional authenticated data) is bound into the authentication tag
+// without being encrypted. Callers pass the secret's name so a ciphertext
+// copied from one row to another (e.g. by someone with write access to the
+// SQLite file) fails to decrypt under the other name.
+func (b *SecretBox) Seal(plaintext, aad []byte) (ciphertext, nonce []byte, err error) {
 	nonce = make([]byte, b.gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, nil, fmt.Errorf("crypto: generating nonce: %w", err)
 	}
-	ciphertext = b.gcm.Seal(nil, nonce, plaintext, nil)
+	ciphertext = b.gcm.Seal(nil, nonce, plaintext, aad)
 	return ciphertext, nonce, nil
 }
 
-// Open decrypts ciphertext using the given nonce.
-func (b *SecretBox) Open(ciphertext, nonce []byte) ([]byte, error) {
-	plaintext, err := b.gcm.Open(nil, nonce, ciphertext, nil)
+// Open decrypts ciphertext using the given nonce and the same aad that was
+// passed to Seal.
+func (b *SecretBox) Open(ciphertext, nonce, aad []byte) ([]byte, error) {
+	plaintext, err := b.gcm.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: decrypting: %w", err)
 	}

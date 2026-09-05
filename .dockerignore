@@ -1,0 +1,14 @@
+.git
+dist
+data
+docs
+*.db
+*.db-shm
+*.db-wal
+forgeai.yaml
+.env
+web/node_modules
+web/src
+web/package*.json
+web/vite.config.js
+web/.oxlintrc.json

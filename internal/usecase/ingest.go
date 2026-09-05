@@ -74,7 +74,7 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 		return fail(fmt.Errorf("unsupported file type for %q", filename))
 	}
 
-	pages, err := loader.Load(ctx, data, knowledge.FileMeta{Filename: filename, MimeType: mimeType})
+	pages, err := loadWithGuard(ctx, loader, data, knowledge.FileMeta{Filename: filename, MimeType: mimeType})
 	if err != nil {
 		return fail(fmt.Errorf("extracting text: %w", err))
 	}
@@ -121,6 +121,47 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 	return &doc, nil
 }
 
+// extractTimeout bounds how long a single loader may run. Parsers of
+// untrusted input (PDF in particular) can be made to loop; the request
+// must still return, even if the goroutine keeps spinning until it next
+// checks ctx.
+const extractTimeout = 30 * time.Second
+
+// embedBatchSize caps how many chunks go to the embeddings API in one
+// request, so a large document neither exceeds provider request limits
+// nor holds the whole document's vectors in one response.
+const embedBatchSize = 128
+
+// loadWithGuard runs loader.Load with a timeout and converts a panic in the
+// loader into an error so a malformed upload marks the document failed
+// instead of leaking a pending row (or crashing the request).
+func loadWithGuard(ctx context.Context, loader knowledge.Loader, data []byte, meta knowledge.FileMeta) (pages []knowledge.Page, err error) {
+	ctx, cancel := context.WithTimeout(ctx, extractTimeout)
+	defer cancel()
+
+	type result struct {
+		pages []knowledge.Page
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- result{nil, fmt.Errorf("loader panicked: %v", r)}
+			}
+		}()
+		p, e := loader.Load(ctx, data, meta)
+		done <- result{p, e}
+	}()
+
+	select {
+	case r := <-done:
+		return r.pages, r.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("text extraction timed out after %s", extractTimeout)
+	}
+}
+
 // embedChunks looks up each chunk's hash first and only calls the
 // embedder for chunks that were never embedded under this model — the
 // core of the "re-ingest doesn't re-embed" guarantee.
@@ -147,14 +188,23 @@ func (u *IngestUseCase) embedChunks(ctx context.Context, chunks []knowledge.Chun
 		return nil
 	}
 
-	texts := make([]string, len(toEmbed))
-	for i, p := range toEmbed {
-		texts[i] = p.chunk.Text
-	}
-
 	traceID := uuid.NewString()
 	start := time.Now()
-	vectors, err := u.Embedder.Embed(ctx, texts)
+	var vectors [][]float32
+	var err error
+	for i := 0; i < len(toEmbed) && err == nil; i += embedBatchSize {
+		end := i + embedBatchSize
+		if end > len(toEmbed) {
+			end = len(toEmbed)
+		}
+		texts := make([]string, 0, end-i)
+		for _, p := range toEmbed[i:end] {
+			texts = append(texts, p.chunk.Text)
+		}
+		var batch [][]float32
+		batch, err = u.Embedder.Embed(ctx, texts)
+		vectors = append(vectors, batch...)
+	}
 	duration := time.Since(start)
 
 	status := trace.StatusOK

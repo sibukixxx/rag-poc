@@ -2,11 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -55,6 +58,21 @@ func toDocumentDTO(d knowledge.Document) documentDTO {
 
 var slugSanitizer = regexp.MustCompile(`[^a-z0-9]+`)
 
+const (
+	// maxNameLen bounds user-supplied names (KB name/slug, filename).
+	maxNameLen = 255
+	// multipartMemoryLimit is how much of an upload stays in RAM before
+	// spooling to disk; the overall body size is capped by the router.
+	multipartMemoryLimit = 1 << 20
+)
+
+// internalError logs the real error and returns a generic message so
+// storage/provider details never reach the client.
+func internalError(w http.ResponseWriter, what string, err error) {
+	log.Printf("knowledge: %s: %v", what, err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
 func slugify(name string) string {
 	slug := slugSanitizer.ReplaceAllString(strings.ToLower(name), "-")
 	return strings.Trim(slug, "-")
@@ -85,9 +103,14 @@ func (h *KnowledgeHandler) CreateKnowledgeBase(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if len(req.Name) > maxNameLen || len(slug) > maxNameLen {
+		http.Error(w, "name/slug too long", http.StatusBadRequest)
+		return
+	}
+
 	kb, err := h.store.EnsureKnowledgeBase(r.Context(), req.Name, slug)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "creating knowledge base", err)
 		return
 	}
 
@@ -98,7 +121,7 @@ func (h *KnowledgeHandler) CreateKnowledgeBase(w http.ResponseWriter, r *http.Re
 func (h *KnowledgeHandler) ListKnowledgeBases(w http.ResponseWriter, r *http.Request) {
 	kbs, err := h.store.ListKnowledgeBases(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "listing knowledge bases", err)
 		return
 	}
 	out := make([]knowledgeBaseDTO, len(kbs))
@@ -120,6 +143,20 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The total body is already capped by MaxBytesReader in the router;
+	// this bounds how much of the multipart form is held in memory (the
+	// rest spools to a temp file, itself bounded by the body cap).
+	if err := r.ParseMultipartForm(multipartMemoryLimit); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "malformed multipart body", http.StatusBadRequest)
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "expected a multipart 'file' field", http.StatusBadRequest)
@@ -129,14 +166,23 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		http.Error(w, "reading upload: "+err.Error(), http.StatusInternalServerError)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		internalError(w, "reading upload", err)
+		return
+	}
+	if len(header.Filename) > maxNameLen {
+		http.Error(w, "filename too long", http.StatusBadRequest)
 		return
 	}
 
 	mimeType := header.Header.Get("Content-Type")
 	doc, err := h.ingest.IngestFile(r.Context(), kbID, header.Filename, mimeType, data)
 	if err != nil && doc == nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "ingesting document", err)
 		return
 	}
 
@@ -168,10 +214,14 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(req.Query) == "" {
+		http.Error(w, "query must not be empty", http.StatusBadRequest)
+		return
+	}
 
 	results, err := h.search.Search(r.Context(), kbID, req.Query, retrieval.Options{TopK: req.TopK, Rerank: req.Rerank})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		internalError(w, "searching knowledge base", err)
 		return
 	}
 
@@ -190,7 +240,7 @@ func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request)
 	kbID := chi.URLParam(r, "id")
 	docs, err := h.store.ListDocuments(r.Context(), kbID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		internalError(w, "listing documents", err)
 		return
 	}
 	out := make([]documentDTO, len(docs))
@@ -246,10 +296,15 @@ func (h *KnowledgeHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "query must not be empty", http.StatusBadRequest)
 		return
 	}
+	if len(req.Query) > maxChatContentChars {
+		http.Error(w, fmt.Sprintf("query too long (max %d chars)", maxChatContentChars), http.StatusRequestEntityTooLarge)
+		return
+	}
 
 	result, err := h.ragChat.ChatStream(r.Context(), kbID, req.Alias, req.Query, req.Rerank)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		log.Printf("knowledge: rag chat kb=%s alias=%q: %v", kbID, req.Alias, err)
+		http.Error(w, "chat failed", http.StatusBadGateway)
 		return
 	}
 
@@ -258,6 +313,10 @@ func (h *KnowledgeHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+
+	// SSE responses are exempt from a global WriteTimeout, so bound them
+	// here instead of leaving a slow reader attached forever.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sseWriteDeadline))
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -273,7 +332,8 @@ func (h *KnowledgeHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	for ev := range result.Events {
 		switch {
 		case ev.Err != nil:
-			write(ragChatStreamEventDTO{Error: ev.Err.Error(), TraceID: result.TraceID})
+			log.Printf("knowledge: rag chat stream trace=%s: %v", result.TraceID, ev.Err)
+			write(ragChatStreamEventDTO{Error: "upstream provider error", TraceID: result.TraceID})
 		case ev.Done:
 			citations := make([]citationDTO, len(ev.Citations))
 			for i, c := range ev.Citations {

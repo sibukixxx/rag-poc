@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/app"
 )
@@ -48,9 +50,11 @@ Usage:
   forgeai serve  [-config path]   Start the server (default port 8080)
   forgeai doctor [-config path]   Check environment and configuration
   forgeai init   [-config path]   Generate a master key and starter config
-  forgeai secret [-config path] set <name> [value]
+  forgeai secret [-config path] set <name>
                                    Store an encrypted secret (e.g. an API key).
-                                   Omit value to read it from stdin.
+                                   The value is read from stdin (hidden on a TTY),
+                                   never from the command line, so it does not
+                                   land in shell history or ps output.
   forgeai secret [-config path] delete <name>
                                    Remove a stored secret.
 
@@ -177,18 +181,14 @@ func cmdSecret(args []string) {
 
 	switch sub {
 	case "set":
-		var value string
 		if len(rest) >= 2 {
-			value = strings.Join(rest[1:], " ")
-		} else {
-			fmt.Fprintln(os.Stderr, "Enter secret value (input hidden only in an interactive TTY):")
-			reader := bufio.NewReader(os.Stdin)
-			line, err := reader.ReadString('\n')
-			if err != nil && err != io.EOF {
-				fmt.Fprintf(os.Stderr, "forgeai: reading value: %v\n", err)
-				os.Exit(1)
-			}
-			value = strings.TrimRight(line, "\r\n")
+			fmt.Fprintln(os.Stderr, "forgeai secret set: pass the value on stdin, not as an argument (it would be visible in shell history and `ps`)")
+			os.Exit(1)
+		}
+		value, err := readSecretValue()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "forgeai: reading value: %v\n", err)
+			os.Exit(1)
 		}
 		if value == "" {
 			fmt.Fprintln(os.Stderr, "forgeai: secret value must not be empty")
@@ -211,4 +211,25 @@ func cmdSecret(args []string) {
 		fmt.Fprintf(os.Stderr, "forgeai secret: unknown subcommand %q\n", sub)
 		os.Exit(1)
 	}
+}
+
+// readSecretValue reads one line from stdin. On an interactive terminal the
+// input is not echoed; when piped (e.g. `echo "$KEY" | forgeai secret set
+// openai`) it is read as a plain line.
+func readSecretValue() (string, error) {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		fmt.Fprint(os.Stderr, "Enter secret value (hidden): ")
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(string(b), "\r\n"), nil
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
