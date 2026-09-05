@@ -91,9 +91,12 @@ base and shows each hit's score, filename, and page.
 Write a new version, diff it against the previous one, and activate it —
 the very next RAG chat call uses it, no redeploy needed.
 
-**Eval** — create a Golden Dataset scoped to a knowledge base, import its
-cases (JSON or CSV, `query` + `expected_filenames`), and run them through
-the same Hybrid Search a real query uses. Each run reports Recall@K,
+**Eval** — create a Golden Dataset (a small, human-verified set of
+questions with known-correct answers — also called an eval set or a
+human-labeled test set; a yardstick for measuring quality, not training
+data) scoped to a knowledge base, import its cases (JSON or CSV, `query` +
+`expected_filenames`), and run them through the same Hybrid Search a real
+query uses. Each run reports Recall@K,
 Precision@K, MRR, and Hit Rate, scored by filename match. See
 [examples/](examples/) for a ready-to-run 50-question Japanese sample.
 
@@ -183,7 +186,9 @@ export FORGEAI_OPENAI_API_KEY=sk-...
   ベクトル+キーワードのハイブリッド検索を単独実行可能
 - **Prompts** — RAG チャットのシステムプロンプトをコード変更なしで編集・
   バージョン管理・切り替え（diff 表示付き）
-- **Eval** — ナレッジベースに紐づく Golden Dataset を作成し、ケース
+- **Eval** — ナレッジベースに紐づく Golden Dataset（人手で正解を検証した
+  少量の評価用データ。eval set / human-labeled test set とも呼ばれる。
+  学習データではなく品質を測る「ものさし」）を作成し、ケース
   （query + expected_filenames）を JSON/CSV でインポート。実際の検索と同じ
   Hybrid Search で評価を実行し、Recall@K / Precision@K / MRR / Hit Rate を表示
   （日本語50問のサンプルは [examples/](examples/) 参照）
