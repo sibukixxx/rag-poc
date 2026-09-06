@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./...
+      - name: Test
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./...
+      - name: Build static binary
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o dist/forgeai ./cmd/forgeai
+      - name: Deterministic evaluation smoke test
+        run: |
+          ./dist/forgeai eval run --dataset examples/evaluation/golden.json --results examples/evaluation/baseline-results.json --output baseline.json
+          ./dist/forgeai eval run --dataset examples/evaluation/golden.json --results examples/evaluation/candidate-results.json --output candidate.json
+          ./dist/forgeai eval compare --baseline baseline.json --candidate candidate.json --output comparison.json
+          ./dist/forgeai eval check --baseline baseline.json --candidate candidate.json --min-mrr-delta=-0.05 --max-regressed-ratio=0.20
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Embedded bundle is committed
+        run: git diff --exit-code -- dist

@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "id": "synthetic-support",
+  "version": "1.0.0",
+  "name": "Synthetic customer-support retrieval cases",
+  "knowledge_base_id": "synthetic-kb",
+  "cases": [
+    {"id":"q-success","query":"返品期限は何日ですか？","relevant_chunk_ids":["returns-window"],"tags":["obvious-success"]},
+    {"id":"q-multiple","query":"配送にかかる日数と料金は？","relevant_chunk_ids":["shipping-time","shipping-price"],"tags":["multiple-relevant"]},
+    {"id":"q-low-rank","query":"保証の対象期間は？","relevant_chunk_ids":["warranty-period"],"tags":["rank-sensitive"]},
+    {"id":"q-missing","query":"海外返品の送料負担は？","relevant_chunk_ids":["international-return-cost"],"tags":["missing-result"]},
+    {"id":"q-empty","query":"法人向け一括請求に対応していますか？","relevant_chunk_ids":["business-billing"],"tags":["empty-retrieval"]},
+    {"id":"q-ambiguous","query":"いつまで？","relevant_chunk_ids":["returns-window"],"tags":["ambiguous"]}
+  ]
+}

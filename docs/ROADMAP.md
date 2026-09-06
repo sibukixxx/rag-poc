@@ -129,20 +129,23 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   search系traceのcostが¥0固定で表示されることをE2E確認時に発見。SearchUseCaseの
   コンストラクタ変更が複数箇所に波及するため、W6の変更範囲としては見送り
 
-### W7: Golden Dataset + Retrieval 評価
-- datasets / dataset_cases、JSON / CSV インポート（UI + CLI）
-- Evaluation Runner（非同期 job）: Recall@K / Precision@K / MRR / Hit Rate
-- `examples/` に日本語サンプル文書 + 50問 Golden Dataset を作る（実データ整備も工数）
-- **完了条件**: `forgeai eval run demo-golden` で Retrieval Hit Rate が出る
+### W7: Golden Dataset + Retrieval 評価 ✅ P0完了
+- versioned JSON Golden Dataset domain + schema（CSV importと永続管理UIはP1）
+- 同期Evaluation Runner: Recall@K / Precision@K / Hit Rate@K / MRR / nDCG@K
+- query-level Evidence、失敗状態、Baseline/Candidate比較、Regression検出
+- schema v1 JSON Artifact、CLI run/compare/check、同期API foundation
+- `examples/evaluation/` に顧客データを含まないdeterministic fixture
+- **完了条件**: provider不要のfixtureでrun→compare→regression gateまでCI smoke test
 
-### W8: LLM Judge 評価
+### W8: Answer / Citation評価（P1）
 - Judge（alias: judge、judge プロンプトもバージョン管理）
 - Correctness / Groundedness / Relevance + reason 保存
 - run 詳細 UI（ケース別スコア、失敗ケースのドリルダウン）
 - **完了条件**: 50問の judge 評価が完走し、低スコアケースの理由が読める
 
-### W9: Experiment 比較
-- run 間比較 API + UI（品質 / Groundedness / P95 レイテンシ / コスト、Winner 表示）
+### W9: Experiment管理（P1/P2）
+- P0: run 間比較 API/CLI、query regression、全体latencyは実装済み
+- P1: 永続run管理 + UI（品質 / Groundedness / P95 レイテンシ / コスト）
 - 比較結果の Markdown エクスポート（顧客向け成果報告の種）
 - **完了条件**: 設定を変えた 2 run の Before/After 表が出て、エクスポートできる
 

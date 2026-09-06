@@ -42,6 +42,7 @@ type Deps struct {
 	RAGChat   *usecase.RAGChatUseCase
 	Prompts   prompt.Store
 	Traces    trace.Store
+	Evaluation *usecase.EvaluateUseCase
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -58,6 +59,7 @@ func NewRouter(deps Deps) http.Handler {
 	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search, deps.RAGChat)
 	prompts := handler.NewPromptHandler(deps.Prompts)
 	traces := handler.NewTraceHandler(deps.Traces)
+	evaluations := handler.NewEvaluationHandler(deps.Evaluation)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(denyCrossSite)
@@ -78,6 +80,8 @@ func NewRouter(deps Deps) http.Handler {
 		r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/activate", prompts.Activate)
 		r.Get("/traces", traces.List)
 		r.Get("/traces/{id}", traces.Get)
+		r.With(limitBody(maxJSONBody)).Post("/evaluations/run", evaluations.Run)
+		r.With(limitBody(maxJSONBody)).Post("/evaluations/compare", evaluations.Compare)
 	})
 
 	r.Handle("/*", noDirListing(staticHandler()))

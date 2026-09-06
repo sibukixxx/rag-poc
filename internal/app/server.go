@@ -48,6 +48,7 @@ func (a *App) Serve() error {
 	keywordSearcher := sqlite.NewFTSStore(a.DB)
 	reranker := llmrerank.New(router, "cheap")
 	search := usecase.NewSearchUseCase(vectorSearcher, keywordSearcher, embedder, reranker, traces)
+	evaluate := &usecase.EvaluateUseCase{Searcher: search, Version: Version, EmbeddingModel: a.Config.Embedding.Model}
 
 	promptStore := sqlite.NewPromptStore(a.DB)
 	if err := seedDefaultPrompts(context.Background(), promptStore); err != nil {
@@ -65,6 +66,7 @@ func (a *App) Serve() error {
 		RAGChat:   ragChat,
 		Prompts:   promptStore,
 		Traces:    traces,
+		Evaluation: evaluate,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

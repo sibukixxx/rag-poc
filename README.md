@@ -2,16 +2,20 @@
 
 > ⚠️ **Alpha Release** — v0.1 is under active development. API and configuration may change. Not recommended for production use without caution.
 
-**A self-hosted RAG / AI application platform in a single Go binary.**
+**A local-first RAG Quality Engineering platform in a single Go binary.**
 
-ForgeAI provides end-to-end knowledge management: ingest documents, run semantic search, evaluate retrieval quality with a golden dataset, and deploy chat APIs. Built with Go + SQLite, it runs on your infrastructure with no external dependencies.
+ForgeAI makes RAG quality measurable and reproducible. It ingests documents, runs the same retrieval pipeline used by RAG chat, evaluates it against a versioned Golden Dataset, compares baseline and candidate runs, detects query-level regressions, and emits stable technical evidence. Built with Go + SQLite, it runs on your infrastructure without mandatory cloud infrastructure.
+
+ForgeAI measures and verifies RAG quality. It produces reproducible metrics, traces, evaluation results, and technical evidence. Business interpretation, remediation priority, consulting recommendations, estimates, pricing, and proposals are outside this repository.
 
 **Key features:**
 - 📄 Support for PDF, TXT, MD, HTML, CSV, JSON files
 - 🔍 Hybrid search with semantic embeddings (OpenAI-compatible models)
-- 🎯 Golden Dataset evaluation — measure retrieval + LLM generation quality
-- 📊 Cost & latency tracking — see token usage and API costs per request
-- 🚀 Deploy chat APIs — secure, rate-limited endpoints for your applications
+- 🎯 Versioned Golden Dataset retrieval evaluation
+- 📐 Recall@K, Precision@K, Hit Rate@K, MRR, and nDCG@K
+- 🔬 Query-level evidence, failure cases, baseline/candidate comparison, and regression detection
+- 📦 Stable schema v1 JSON artifacts for CI and downstream consumers
+- 📊 Trace, latency, token, and cost evidence where observable (missing values remain unavailable, never fake zeroes)
 - 🔐 Encrypted secret storage — AES-GCM with per-secret authentication
 
 ## Documentation
@@ -20,6 +24,8 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 12-week development roadmap
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — Design decisions, trade-offs, risk assessment
 - [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Free deployment guide (Cloudflare Tunnel + Workers)
+- [docs/EVALUATION.md](docs/EVALUATION.md) — Golden Dataset, metrics, CLI/API, artifacts, CI, and privacy
+- [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) — Code-backed implementation assessment and known debt
 
 ## Installation
 
@@ -81,7 +87,7 @@ Visit http://localhost:8080 to access the interface.
 
 ### 5. Use ForgeAI
 
-The UI provides four main features:
+The UI currently provides four main features:
 
 **Chat** — Select an LLM alias (cheap / normal / judge) and chat interactively. Each reply shows token counts and API costs, recorded as Traces in SQLite. Optionally select a Knowledge Base to enable Hybrid Search retrieval with inline citations (`[1]`, `[2]`, etc.).
 
@@ -90,6 +96,47 @@ The UI provides four main features:
 **Prompts** — Edit the RAG chat's system prompt without code changes. Write a version, diff it against the previous one, and activate it — the very next chat call uses it, no redeploy needed.
 
 **Traces** — View every chat, search, and ingest call with detailed spans (type, latency, tokens, cost, status). Debug prompt and config changes by comparing traces side-by-side.
+
+### Evaluate retrieval
+
+Run the live retrieval pipeline against a Golden Dataset:
+
+```bash
+./dist/forgeai eval run --dataset golden.json --output evaluation/
+```
+
+Compare a baseline and candidate, then apply thresholds chosen by the operator:
+
+```bash
+./dist/forgeai eval compare --baseline baseline.json --candidate candidate.json
+./dist/forgeai eval check --baseline baseline.json --candidate candidate.json \
+  --min-mrr-delta=-0.05 --max-regressed-ratio=0.20
+```
+
+The bundled synthetic fixtures provide an offline, deterministic metrics demo; see [docs/EVALUATION.md](docs/EVALUATION.md).
+
+## Available today
+
+- ingestion, chunking, embeddings, vector/FTS5 hybrid retrieval, RRF, optional reranking
+- cited RAG chat, prompt registry, retrieval/answer traces
+- versioned JSON Golden Datasets
+- deterministic retrieval metrics and query-level failure evidence
+- Evaluation Run artifacts, baseline/candidate comparison, regression detection
+- `eval run`, `eval compare`, and user-configured `eval check` CLI commands
+- synchronous evaluation run/compare API foundation
+
+## Planned / in development
+
+- Evaluation and Golden Dataset management UI
+- durable Evaluation Run storage and richer score/trace linkage
+- phase-level latency and complete retrieval token/cost accounting
+- deterministic citation checks and explicitly non-ground-truth LLM judge evaluation
+- benchmark suite, multi-run trends, and advanced experiment management
+- runtime deployment API
+
+## Non-goals
+
+ForgeAI does not contain TechVit proprietary assessment, root-cause consulting, automatic remediation, customer-specific architecture recommendations, improvement priorities, estimates, pricing, proposals, sales reports, CRM, lead management, autonomous optimization, a hosted multi-tenant SaaS, or mandatory cloud infrastructure. It reports facts and deltas; it does not decree that a specific chunk size, model, or architecture is correct.
 
 ## Development
 
@@ -144,12 +191,12 @@ cmd/forgeai        ← Main entry point (bootstrap, CLI, API server)
 internal/app       ← Wiring, HTTP server setup
   ↓
 internal/http      ← Chi router, API handlers, SSE
-internal/usecase   ← Business logic (chat, ingest)
+internal/usecase   ← Application logic (chat, ingest, evaluate)
   ↓
 internal/domain    ← Interfaces only (no external deps)
   ↓
 internal/adapter   ← Implementations
-  ├─ sqlite        ← Database & embedded migrations
+  ├─ sqlite        ← Database, FTS5 & embedded migrations
   ├─ crypto        ← AES-GCM secret storage
   ├─ openaicompat  ← LLM & embedding client
   └─ extractor     ← PDF, HTML, text parsing
@@ -160,10 +207,10 @@ See [AGENTS.md](AGENTS.md) for detailed design decisions and conventions.
 ## v0.1 Roadmap
 
 ```
-Upload Documents  →  Semantic Search  →  Golden Dataset Eval  →  Quality Analysis  →  Deploy API
+Upload Documents  →  Hybrid Search  →  Golden Dataset Eval  →  Evidence / Compare  →  Verify
        ↓                   ↓                      ↓                    ↓                  ↓
-  PDF/TXT/MD/      Hybrid (BM25 +          50 benchmark          Side-by-side       /runtime/v1
-  HTML/CSV/JSON    vectors, multi-lang)    questions             Before/After        chat endpoints
+  PDF/TXT/MD/      FTS5 + vectors,        versioned cases       query regressions    JSON / CI
+  HTML/CSV/JSON    merged by RRF           and ground truth      and metric deltas    thresholds
 ```
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the 12-week development plan.
@@ -186,14 +233,15 @@ For security issues, see [SECURITY.md](SECURITY.md).
 
 ### ForgeAI について
 
-ForgeAI は、**Go 単一バイナリで動作する自ホスト型 RAG / AI アプリケーション プラットフォーム**です。
+ForgeAI は、**Go 単一バイナリで動作するLocal-first RAG Quality Engineering Platform**です。RAG品質を感覚ではなく、再現可能な技術Evidenceとして測定・比較・検証します。原因診断、改善優先順位、見積、提案などのコンサルティング判断は対象外です。
 
 **主な機能：**
 - 📄 PDF、TXT、MD、HTML、CSV、JSON ファイルをサポート
 - 🔍 ハイブリッド検索（セマンティック + BM25）で日本語対応
-- 🎯 Golden Dataset による検索・生成品質の自動評価
-- 📊 トークン数と API コストの追跡
-- 🚀 認証・レート制限付きチャット API のデプロイ
+- 🎯 version付きGolden DatasetによるRetrieval評価
+- 📐 Recall@K / Precision@K / Hit Rate@K / MRR / nDCG@K
+- 🔬 Query別Evidence、失敗ケース、Baseline/Candidate比較、Regression検出
+- 📦 downstreamやCIで利用できるschema v1 JSON Artifact
 - 🔐 AES-GCM による秘密情報の暗号化保存
 
 ### クイックスタート
@@ -218,6 +266,8 @@ export FORGEAI_OPENAI_API_KEY=sk-...
 - **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
   （種別・レイテンシ・トークン・コスト・状態）で確認可能
 
+Evaluation UIは未実装です。現時点ではCLI/APIとJSON Artifactを利用してください。詳細は [docs/EVALUATION.md](docs/EVALUATION.md) を参照してください。
+
 ### デプロイ
 
 ```bash
@@ -229,7 +279,7 @@ Cloudflare Tunnel で無料公開可能（手順は [docs/deploy-cloudflare.md](
 ### v0.1 完成条件
 
 ```
-文書投入 → ハイブリッド検索 → Golden Dataset 評価 → Before/After 比較 → API デプロイ
+文書投入 → ハイブリッド検索 → Golden Dataset 評価 → Baseline/Candidate比較 → Regression検出 → JSON Evidence
 ```
 
 詳しくは [docs/ROADMAP.md](docs/ROADMAP.md) をご覧ください。
