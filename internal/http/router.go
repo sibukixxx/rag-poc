@@ -49,6 +49,7 @@ type Deps struct {
 	Traces    trace.Store
 	Datasets  eval.Store
 	Eval      *usecase.EvaluationUseCase
+	Compare   *usecase.CompareUseCase
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -65,7 +66,7 @@ func NewRouter(deps Deps) http.Handler {
 	kb := handler.NewKnowledgeHandler(deps.Knowledge, deps.Ingest, deps.Search, deps.RAGChat)
 	prompts := handler.NewPromptHandler(deps.Prompts)
 	traces := handler.NewTraceHandler(deps.Traces)
-	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval)
+	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval, deps.Compare)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(denyCrossSite)
@@ -92,6 +93,9 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/datasets/{id}/cases", evaluations.ListCases)
 		r.With(limitBody(maxJSONBody)).Post("/evaluations", evaluations.CreateEvaluation)
 		r.Get("/evaluations", evaluations.ListEvaluations)
+		// Static segment registered before {id} so "compare" is never
+		// parsed as a run ID.
+		r.Get("/evaluations/compare", evaluations.CompareEvaluations)
 		r.Get("/evaluations/{id}", evaluations.GetEvaluation)
 	})
 

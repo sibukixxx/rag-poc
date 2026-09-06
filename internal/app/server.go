@@ -61,6 +61,7 @@ func (a *App) Serve() error {
 	datasets := sqlite.NewEvalStore(a.DB)
 	judge := usecase.NewLLMJudge(router, prices, traces, promptStore)
 	evalUC := usecase.NewEvaluationUseCase(search, ragChat, judge, datasets, traces)
+	compareUC := usecase.NewCompareUseCase(datasets)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
@@ -74,6 +75,7 @@ func (a *App) Serve() error {
 		Traces:    traces,
 		Datasets:  datasets,
 		Eval:      evalUC,
+		Compare:   compareUC,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

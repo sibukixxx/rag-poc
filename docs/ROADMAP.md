@@ -206,10 +206,43 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   クエリ埋め込みを2回呼ぶ（top_k が違うため）。コスト影響は小さいが W9 以降で
   結果を共有する形に寄せられる
 
-### W9: Experiment 比較
-- run 間比較 API + UI（品質 / Groundedness / P95 レイテンシ / コスト、Winner 表示）
-- 比較結果の Markdown エクスポート（顧客向け成果報告の種）
-- **完了条件**: 設定を変えた 2 run の Before/After 表が出て、エクスポートできる
+### W9: Experiment 比較 ✅ 完了
+- `internal/usecase/compare.go`: `CompareUseCase.Compare(a, b)`。同一 dataset の done な
+  2 run を読み、`BuildComparison`（純関数、単体テスト対象）で Before/After を組み立てる
+  - run ごとの `RunSummary`: 既存の品質メトリクスに加え、per-case `duration_ms` から
+    平均 / **P95 レイテンシ**（nearest-rank）、`cost_usd` から合計 / 平均コストを算出
+  - メトリクス行（`MetricDelta`）: Hit Rate / Recall@K / Precision@K / MRR /
+    Correctness / Groundedness / Relevance / 平均・P95 レイテンシ / 合計・平均コスト。
+    各行に A/B/Δ と行単位の Better（tie 帯: 品質 0.005、レイテンシ 1ms、コスト 1e-6）。
+    judge メトリクスは **両方が judge run のときだけ** `Available`（片方だけ判定済みの
+    比較で 0 点扱いにしない）
+  - **Winner**: 利用可能な「高いほど良い」メトリクスの平均で決め、同点ならコストが安い方。
+    根拠を1文（`Rationale`）で返す
+  - ケース単位の diff（`CaseDelta`）: hit / reciprocal rank / judge 平均で
+    improved / regressed / mixed / same を判定し、集計（improved N, regressed M）
+- `RenderComparisonMarkdown`: 顧客向け成果報告の種になる Markdown（Runs 表、Metrics 表、
+  Winner + 根拠、Changed cases 表。query 中の `|` はエスケープ）
+- API: `GET /api/v1/evaluations/compare?a=&b=`（JSON、`markdown` フィールド同梱）、
+  `&format=markdown` で `text/markdown` + `Content-Disposition: attachment`。
+  `/evaluations/compare` は `/evaluations/{id}` より先に登録して "compare" を ID と
+  誤解釈させない。異なる dataset / 未完了 run / 同一 run は 400
+- CLI: `forgeai eval list <dataset>`（run ID と設定・主要メトリクス一覧）、
+  `forgeai eval compare [-markdown] [-o report.md] <run-a> <run-b>`
+- UI: Eval タブの run 一覧に A/B ラジオ（done の run のみ選択可）→ 選ぶと Before/After
+  パネル（Winner バッジ + 根拠、メトリクス表、improved/regressed 集計、changed cases 表、
+  **Download Markdown** / **Copy Markdown**）
+- **完了条件**: 設定を変えた 2 run の Before/After 表が出て、エクスポートできる → 確認済み
+  （モックで run A `judge, alias=cheap` と run B `rerank, judge, alias=normal` を作成。
+  `forgeai eval compare A B` で Hit Rate 1.000→0.140 / MRR 0.409→0.140 / Correctness
+  0.690→0.704 の表と Winner: A（mean quality 0.684 vs 0.406）、6 improved / 33 regressed
+  を表示。`-o report.md` で Markdown 出力。HTTP JSON と `format=markdown`（添付ヘッダ付き）
+  を確認、Playwright で A/B 選択 → パネル描画 → Download リンクが text/markdown を返すことを
+  確認。単体テストは winner 判定・コストでのタイブレーク・judge 行の非表示・Markdown
+  出力・入力検証をカバー）
+- **検証時の知見**: run B の Hit Rate 低下はモックの回答文に `[1]` が含まれるため
+  reranker が「候補 1 だけが関連」と解釈した結果（reranker の仕様通り）。比較機能の
+  デモとしては本物の regression が出て好都合だった。またモックは応答が 1ms 未満のため
+  レイテンシ列が 0 になる（実プロバイダでは意味のある値になる）
 
 ### W10: Deployment + Runtime API
 - deployments（設定スナップショット = prompt vN + alias + retriever 設定）

@@ -101,6 +101,9 @@ Precision@K, MRR, and Hit Rate, scored by filename match. Turn on **LLM
 Judge** and each question is also answered through the RAG pipeline and
 graded by the `judge` alias for Correctness / Groundedness / Relevance
 (0–1) with a written reason; click a run to drill into low-scoring cases.
+Pick any two finished runs as **A / B** for a Before/After table (quality,
+P95 latency, cost, per-case improvements/regressions, a winner with its
+rationale) and export it as Markdown for a customer-facing report.
 See [examples/](examples/) for a ready-to-run 50-question Japanese sample.
 
 **Traces** — every chat, RAG chat, search, and ingest call is recorded
@@ -196,7 +199,9 @@ export FORGEAI_OPENAI_API_KEY=sk-...
   Hybrid Search で評価を実行し、Recall@K / Precision@K / MRR / Hit Rate を表示。
   **LLM Judge** を有効にすると各質問に RAG で回答し、`judge` alias が
   Correctness / Groundedness / Relevance（0〜1）と理由を採点。run をクリックすると
-  低スコアケースを理由付きで確認できる（日本語50問のサンプルは [examples/](examples/) 参照）
+  低スコアケースを理由付きで確認できる。完了した run を 2 つ **A / B** に選ぶと
+  Before/After 表（品質・P95 レイテンシ・コスト・ケース単位の改善/悪化・Winner と根拠）が
+  出て、Markdown でエクスポートできる（日本語50問のサンプルは [examples/](examples/) 参照）
 - **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
   （種別・レイテンシ・トークン・コスト・状態）で確認可能
 

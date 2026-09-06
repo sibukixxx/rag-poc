@@ -20,6 +20,12 @@ func (a *App) Knowledge() knowledge.Store {
 	return sqlite.NewKnowledgeStore(a.DB)
 }
 
+// Datasets returns the eval.Store for CLI commands that only read runs
+// (`forgeai eval list|compare`) and don't need LLM/embedding wiring.
+func (a *App) Datasets() eval.Store {
+	return sqlite.NewEvalStore(a.DB)
+}
+
 // Ingest wires an IngestUseCase against this App's database — the same
 // pipeline `POST /api/v1/knowledge-bases/:id/documents` uses — for
 // `forgeai ingest`.

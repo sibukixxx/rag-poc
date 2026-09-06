@@ -19,10 +19,11 @@ import (
 type EvalHandler struct {
 	datasets eval.Store
 	eval     *usecase.EvaluationUseCase
+	compare  *usecase.CompareUseCase
 }
 
-func NewEvalHandler(datasets eval.Store, evalUC *usecase.EvaluationUseCase) *EvalHandler {
-	return &EvalHandler{datasets: datasets, eval: evalUC}
+func NewEvalHandler(datasets eval.Store, evalUC *usecase.EvaluationUseCase, compare *usecase.CompareUseCase) *EvalHandler {
+	return &EvalHandler{datasets: datasets, eval: evalUC, compare: compare}
 }
 
 type datasetDTO struct {
@@ -357,4 +358,110 @@ func (h *EvalHandler) ListEvaluations(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
+}
+
+type runSummaryDTO struct {
+	Run          runDTO  `json:"run"`
+	Cases        int     `json:"cases"`
+	Errors       int     `json:"errors"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	P95LatencyMS int64   `json:"p95_latency_ms"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
+	AvgCostUSD   float64 `json:"avg_cost_usd"`
+}
+
+type metricDeltaDTO struct {
+	Name           string  `json:"name"`
+	Key            string  `json:"key"`
+	A              float64 `json:"a"`
+	B              float64 `json:"b"`
+	Delta          float64 `json:"delta"`
+	Winner         string  `json:"winner"`
+	HigherIsBetter bool    `json:"higher_is_better"`
+	Available      bool    `json:"available"`
+}
+
+type caseDeltaDTO struct {
+	CaseID  string         `json:"case_id"`
+	Query   string         `json:"query"`
+	A       *caseResultDTO `json:"a,omitempty"`
+	B       *caseResultDTO `json:"b,omitempty"`
+	Changed bool           `json:"changed"`
+	Verdict string         `json:"verdict"`
+}
+
+type comparisonDTO struct {
+	Dataset   datasetDTO       `json:"dataset"`
+	A         runSummaryDTO    `json:"a"`
+	B         runSummaryDTO    `json:"b"`
+	Metrics   []metricDeltaDTO `json:"metrics"`
+	Cases     []caseDeltaDTO   `json:"cases"`
+	Winner    string           `json:"winner"`
+	Rationale string           `json:"rationale"`
+	Improved  int              `json:"improved"`
+	Regressed int              `json:"regressed"`
+	Judged    bool             `json:"judged"`
+	Markdown  string           `json:"markdown"`
+}
+
+func toRunSummaryDTO(s usecase.RunSummary) runSummaryDTO {
+	return runSummaryDTO{
+		Run: toRunDTO(s.Run), Cases: s.Cases, Errors: s.Errors,
+		AvgLatencyMS: s.AvgLatencyMS, P95LatencyMS: s.P95LatencyMS,
+		TotalCostUSD: s.TotalCostUSD, AvgCostUSD: s.AvgCostUSD,
+	}
+}
+
+func toComparisonDTO(c *usecase.Comparison) comparisonDTO {
+	dto := comparisonDTO{
+		Dataset: toDatasetDTO(c.Dataset), A: toRunSummaryDTO(c.A), B: toRunSummaryDTO(c.B),
+		Winner: c.Winner, Rationale: c.Rationale, Improved: c.Improved, Regressed: c.Regressed,
+		Judged: c.Judged, Markdown: usecase.RenderComparisonMarkdown(c),
+	}
+	for _, m := range c.Metrics {
+		dto.Metrics = append(dto.Metrics, metricDeltaDTO{
+			Name: m.Name, Key: m.Key, A: m.A, B: m.B, Delta: m.Delta,
+			Winner: m.Winner, HigherIsBetter: m.HigherIsBetter, Available: m.Available,
+		})
+	}
+	for _, cd := range c.Cases {
+		d := caseDeltaDTO{CaseID: cd.CaseID, Query: cd.Query, Changed: cd.Changed, Verdict: cd.Verdict}
+		if cd.A != nil {
+			a := toCaseResultDTO(*cd.A, nil)
+			d.A = &a
+		}
+		if cd.B != nil {
+			b := toCaseResultDTO(*cd.B, nil)
+			d.B = &b
+		}
+		dto.Cases = append(dto.Cases, d)
+	}
+	return dto
+}
+
+// CompareEvaluations handles GET /api/v1/evaluations/compare?a=&b=
+// (docs/V0.1_SPEC.md §6: Before/After). With format=markdown the report
+// is returned as text/markdown for download; the JSON form carries the
+// same Markdown in its "markdown" field.
+func (h *EvalHandler) CompareEvaluations(w http.ResponseWriter, r *http.Request) {
+	a, b := strings.TrimSpace(r.URL.Query().Get("a")), strings.TrimSpace(r.URL.Query().Get("b"))
+	if a == "" || b == "" {
+		http.Error(w, "a and b query parameters are required", http.StatusBadRequest)
+		return
+	}
+	c, err := h.compare.Compare(r.Context(), a, b)
+	if err != nil {
+		// Compare's errors are all client-facing (unknown run, different
+		// datasets, unfinished run) and carry no upstream detail.
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if r.URL.Query().Get("format") == "markdown" {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="comparison.md"`)
+		io.WriteString(w, usecase.RenderComparisonMarkdown(c))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toComparisonDTO(c))
 }

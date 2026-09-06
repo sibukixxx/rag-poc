@@ -77,6 +77,12 @@ Usage:
                                    With -judge, also answer each case via RAG and have
                                    the LLM Judge score Correctness / Groundedness /
                                    Relevance, listing low-scoring cases with reasons.
+  forgeai eval list [-config path] <dataset-name>
+                                   List a dataset's runs (ID, config, metrics).
+  forgeai eval compare [-config path] [-markdown] [-o file.md] <run-a> <run-b>
+                                   Before/After of two runs on the same dataset:
+                                   quality, P95 latency, cost, winner, changed cases.
+                                   -markdown prints (or -o writes) the report.
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`)
@@ -313,7 +319,7 @@ func cmdIngest(args []string) {
 
 func cmdEval(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "forgeai eval: expected a subcommand (import, run)")
+		fmt.Fprintln(os.Stderr, "forgeai eval: expected a subcommand (import, run, list, compare)")
 		os.Exit(1)
 	}
 	switch args[0] {
@@ -321,6 +327,10 @@ func cmdEval(args []string) {
 		cmdEvalImport(args[1:])
 	case "run":
 		cmdEvalRun(args[1:])
+	case "list":
+		cmdEvalList(args[1:])
+	case "compare":
+		cmdEvalCompare(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "forgeai eval: unknown subcommand %q\n", args[0])
 		os.Exit(1)
@@ -471,6 +481,138 @@ func cmdEvalRun(args []string) {
 	// Low-scoring cases with the judge's reason: the W8 completion
 	// criterion is that these are readable right here, without the UI.
 	printLowScoringCases(datasets, ds.ID, final.ID)
+}
+
+// cmdEvalList prints a dataset's runs so their IDs can be fed to
+// `forgeai eval compare`.
+func cmdEvalList(args []string) {
+	fs := flag.NewFlagSet("eval list", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "forgeai eval list: expected <dataset-name>")
+		os.Exit(1)
+	}
+
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+
+	datasets := a.Datasets()
+	ds, err := datasets.GetDatasetByName(context.Background(), rest[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: dataset %q not found\n", rest[0])
+		os.Exit(1)
+	}
+	runs, err := datasets.ListRuns(context.Background(), ds.ID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	if len(runs) == 0 {
+		fmt.Printf("forgeai: no runs yet for dataset %q\n", rest[0])
+		return
+	}
+	fmt.Printf("%-36s  %-8s  %-28s  %6s  %6s  %6s  %6s  %s\n", "RUN ID", "STATUS", "CONFIG", "HIT", "MRR", "CORR", "GRND", "STARTED")
+	for _, r := range runs {
+		cfg := fmt.Sprintf("k=%d", r.TopK)
+		if r.Rerank {
+			cfg += " rerank"
+		}
+		if r.Judge {
+			cfg += " judge(" + r.Alias + ")"
+		}
+		corr, grnd := "-", "-"
+		if r.Judge {
+			corr, grnd = fmt.Sprintf("%.3f", r.Correctness), fmt.Sprintf("%.3f", r.Groundedness)
+		}
+		fmt.Printf("%-36s  %-8s  %-28s  %6.3f  %6.3f  %6s  %6s  %s\n",
+			r.ID, r.Status, cfg, r.HitRate, r.MRR, corr, grnd, r.StartedAt.Format("2006-01-02 15:04:05"))
+	}
+}
+
+// cmdEvalCompare prints the Before/After of two runs
+// (docs/ROADMAP.md W9 completion: "2 run の Before/After 表が出て、
+// エクスポートできる").
+func cmdEvalCompare(args []string) {
+	fs := flag.NewFlagSet("eval compare", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	markdown := fs.Bool("markdown", false, "print the full Markdown report instead of the summary table")
+	outPath := fs.String("o", "", "write the Markdown report to this file")
+	fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) < 2 {
+		fmt.Fprintln(os.Stderr, "forgeai eval compare: expected <run-a> <run-b>")
+		os.Exit(1)
+	}
+
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+
+	c, err := usecase.NewCompareUseCase(a.Datasets()).Compare(context.Background(), rest[0], rest[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	report := usecase.RenderComparisonMarkdown(c)
+
+	if *outPath != "" {
+		if err := os.WriteFile(*outPath, []byte(report), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "forgeai: writing %s: %v\n", *outPath, err)
+			os.Exit(1)
+		}
+		fmt.Printf("forgeai: wrote %s\n", *outPath)
+		if !*markdown {
+			return
+		}
+	}
+	if *markdown {
+		fmt.Print(report)
+		return
+	}
+
+	fmt.Printf("forgeai: comparing runs on dataset %q\n", c.Dataset.Name)
+	fmt.Printf("  A: %s  (%s)\n", c.A.Run.ID, describeRunConfig(c.A.Run))
+	fmt.Printf("  B: %s  (%s)\n\n", c.B.Run.ID, describeRunConfig(c.B.Run))
+	fmt.Printf("  %-22s %10s %10s %10s  %s\n", "METRIC", "A", "B", "Δ", "BETTER")
+	for _, m := range c.Metrics {
+		if !m.Available {
+			continue
+		}
+		fmt.Printf("  %-22s %10s %10s %10s  %s\n", m.Name, fmtMetric(m.Key, m.A), fmtMetric(m.Key, m.B), fmtMetric(m.Key, m.Delta), strings.ToUpper(m.Winner))
+	}
+	fmt.Printf("\n  Winner: %s — %s\n", strings.ToUpper(c.Winner), c.Rationale)
+	fmt.Printf("  Cases: %d improved, %d regressed, %d unchanged\n", c.Improved, c.Regressed, len(c.Cases)-c.Improved-c.Regressed)
+	fmt.Println("\n  (add -markdown for the full report incl. changed cases, or -o report.md to save it)")
+}
+
+func describeRunConfig(r eval.Run) string {
+	parts := []string{fmt.Sprintf("top_k=%d", r.TopK)}
+	if r.Rerank {
+		parts = append(parts, "rerank")
+	}
+	if r.Judge {
+		parts = append(parts, "judge", "alias="+r.Alias)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func fmtMetric(key string, v float64) string {
+	switch key {
+	case "avg_latency_ms", "p95_latency_ms":
+		return fmt.Sprintf("%.0f", v)
+	case "total_cost_usd", "avg_cost_usd":
+		return fmt.Sprintf("$%.6f", v)
+	}
+	return fmt.Sprintf("%.3f", v)
 }
 
 // lowScoreThreshold is the score at or below which a judged case is

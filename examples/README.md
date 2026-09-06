@@ -24,4 +24,11 @@ reference answer — a Golden Dataset for Retrieval evaluation
 # "judge" alias score Correctness / Groundedness / Relevance against the
 # reference answer, then lists low-scoring cases with the judge's reason.
 ./dist/forgeai eval run -judge demo-golden
+
+# Change something (e.g. -rerank, or activate a new rag_system prompt version),
+# run again, then compare the two runs: Before/After table, winner, and a
+# Markdown report you can hand to a customer.
+./dist/forgeai eval run -judge -rerank demo-golden
+./dist/forgeai eval list demo-golden
+./dist/forgeai eval compare -o report.md <run-a-id> <run-b-id>
 ```

@@ -196,8 +196,14 @@ function RunPanel({ datasetId, runs, onStarted, onError }) {
   const [alias, setAlias] = useState('normal')
   const [starting, setStarting] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState('')
+  const [compareA, setCompareA] = useState('')
+  const [compareB, setCompareB] = useState('')
 
-  useEffect(() => setSelectedRunId(''), [datasetId])
+  useEffect(() => {
+    setSelectedRunId('')
+    setCompareA('')
+    setCompareB('')
+  }, [datasetId])
 
   async function startRun(e) {
     e.preventDefault()
@@ -260,6 +266,7 @@ function RunPanel({ datasetId, runs, onStarted, onError }) {
         <table className="doc-table trace-table">
           <thead>
             <tr>
+              <th title="pick two finished runs to compare">A / B</th>
               <th>Status</th>
               <th>Config</th>
               <th>Recall@K</th>
@@ -280,6 +287,14 @@ function RunPanel({ datasetId, runs, onStarted, onError }) {
                 title={r.error || ''}
                 onClick={() => setSelectedRunId(r.id)}
               >
+                <td onClick={(e) => e.stopPropagation()}>
+                  <label className="ab-pick" title="A (before)">
+                    <input type="radio" name="compare-a" disabled={r.status !== 'done'} checked={compareA === r.id} onChange={() => setCompareA(r.id)} />A
+                  </label>
+                  <label className="ab-pick" title="B (after)">
+                    <input type="radio" name="compare-b" disabled={r.status !== 'done'} checked={compareB === r.id} onChange={() => setCompareB(r.id)} />B
+                  </label>
+                </td>
                 <td>{STATUS_LABEL[r.status] || r.status}</td>
                 <td>
                   k={r.top_k}
@@ -300,8 +315,158 @@ function RunPanel({ datasetId, runs, onStarted, onError }) {
         </table>
       )}
 
+      {compareA && compareB && compareA !== compareB && (
+        <ComparePanel a={compareA} b={compareB} onError={onError} />
+      )}
+
       {selectedRun && <RunDetail run={selectedRun} onError={onError} />}
     </main>
+  )
+}
+
+function fmtMetric(key, v) {
+  if (key === 'avg_latency_ms' || key === 'p95_latency_ms') return v.toFixed(0)
+  if (key === 'total_cost_usd' || key === 'avg_cost_usd') return `$${v.toFixed(6)}`
+  return v.toFixed(3)
+}
+
+function fmtDelta(key, d) {
+  if (Math.abs(d) < 1e-9) return '±0'
+  return (d > 0 ? '+' : '−') + fmtMetric(key, Math.abs(d))
+}
+
+// ComparePanel is the W9 Before/After view of two runs
+// (docs/ROADMAP.md W9: "品質 / Groundedness / P95 レイテンシ / コスト、Winner 表示").
+function ComparePanel({ a, b, onError }) {
+  const [cmp, setCmp] = useState(null)
+  const [onlyChanged, setOnlyChanged] = useState(true)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setCmp(null)
+    fetch(`/api/v1/evaluations/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(await r.text())
+        return r.json()
+      })
+      .then((body) => {
+        if (!cancelled) setCmp(body)
+      })
+      .catch((err) => onError(String(err.message || err)))
+    return () => {
+      cancelled = true
+    }
+  }, [a, b, onError])
+
+  if (!cmp) return <div className="trace-detail"><p className="empty">Comparing…</p></div>
+
+  const label = (w) => (w === 'a' ? 'A' : w === 'b' ? 'B' : 'tie')
+  const cases = onlyChanged ? cmp.cases.filter((c) => c.changed) : cmp.cases
+  const judgeMean = (r) => (r && !r.error ? ((r.correctness + r.groundedness + r.relevance) / 3).toFixed(2) : '—')
+  const hit = (r) => (!r ? '-' : r.error ? 'err' : r.hit ? '✓' : '✗')
+
+  async function copyMarkdown() {
+    try {
+      await navigator.clipboard.writeText(cmp.markdown)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch (err) {
+      onError(String(err.message || err))
+    }
+  }
+
+  return (
+    <div className="trace-detail compare-panel">
+      <h3>
+        Before/After — winner: <span className={`winner winner-${cmp.winner}`}>{label(cmp.winner)}</span>
+        <span className="compare-rationale"> · {cmp.rationale}</span>
+      </h3>
+      <p className="compare-config">
+        <strong>A:</strong> k={cmp.a.run.top_k}{cmp.a.run.rerank ? ' · rerank' : ''}{cmp.a.run.judge ? ` · judge (${cmp.a.run.alias})` : ''}
+        {' · '}{new Date(cmp.a.run.started_at).toLocaleString()}
+        <br />
+        <strong>B:</strong> k={cmp.b.run.top_k}{cmp.b.run.rerank ? ' · rerank' : ''}{cmp.b.run.judge ? ` · judge (${cmp.b.run.alias})` : ''}
+        {' · '}{new Date(cmp.b.run.started_at).toLocaleString()}
+      </p>
+
+      <table className="doc-table compare-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>A</th>
+            <th>B</th>
+            <th>Δ (B−A)</th>
+            <th>Better</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cmp.metrics.filter((m) => m.available).map((m) => (
+            <tr key={m.key} className={`doc-row winner-row-${m.winner}`}>
+              <td>{m.name}</td>
+              <td>{fmtMetric(m.key, m.a)}</td>
+              <td>{fmtMetric(m.key, m.b)}</td>
+              <td>{fmtDelta(m.key, m.delta)}</td>
+              <td className={`winner winner-${m.winner}`}>{label(m.winner)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="compare-actions">
+        <span>
+          {cmp.improved} improved · {cmp.regressed} regressed · {cmp.cases.length - cmp.improved - cmp.regressed} unchanged
+        </span>
+        <label className="rerank-toggle">
+          <input type="checkbox" checked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} />
+          Only changed cases
+        </label>
+        <a
+          className="link-button"
+          href={`/api/v1/evaluations/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}&format=markdown`}
+          download="comparison.md"
+        >
+          Download Markdown
+        </a>
+        <button className="link-button" onClick={copyMarkdown}>
+          {copied ? 'Copied!' : 'Copy Markdown'}
+        </button>
+      </div>
+
+      {cases.length > 0 && (
+        <table className="doc-table">
+          <thead>
+            <tr>
+              <th>Verdict</th>
+              <th>Query</th>
+              <th>Hit A→B</th>
+              <th>RR A→B</th>
+              {cmp.judged && <th>Judge A→B</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {cases.map((c) => (
+              <tr key={c.case_id} className={`doc-row verdict-${c.verdict}`}>
+                <td>{c.verdict}</td>
+                <td>{c.query}</td>
+                <td>
+                  {hit(c.a)}→{hit(c.b)}
+                </td>
+                <td>
+                  {c.a ? c.a.reciprocal_rank.toFixed(2) : '-'}→{c.b ? c.b.reciprocal_rank.toFixed(2) : '-'}
+                </td>
+                {cmp.judged && (
+                  <td>
+                    {judgeMean(c.a)}→{judgeMean(c.b)}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {cases.length === 0 && <p className="empty">No changed cases.</p>}
+    </div>
   )
 }
 
