@@ -54,7 +54,7 @@ Comparison reports aggregate metric deltas plus `IMPROVED`, `REGRESSED`, `UNCHAN
 - `POST /api/v1/evaluations/run` accepts `{ "dataset": ..., "config": ... }` and returns a run artifact.
 - `POST /api/v1/evaluations/compare` accepts `{ "baseline": ..., "candidate": ... }`.
 
-Runs are synchronous in schema v1. File artifacts are the stable persistence/interchange boundary for P0; durable run management and UI are planned.
+Runs are synchronous in schema v1. File artifacts are the stable persistence/interchange boundary for P0. The embedded Evaluation UI can run an uploaded dataset, load an existing artifact, inspect query evidence, and compare two artifacts. Durable run management and an in-app Golden Dataset editor remain planned.
 
 ## Artifact compatibility
 

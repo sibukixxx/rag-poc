@@ -87,7 +87,7 @@ Visit http://localhost:8080 to access the interface.
 
 ### 5. Use ForgeAI
 
-The UI currently provides four main features:
+The UI currently provides five main features:
 
 **Chat** — Select an LLM alias (cheap / normal / judge) and chat interactively. Each reply shows token counts and API costs, recorded as Traces in SQLite. Optionally select a Knowledge Base to enable Hybrid Search retrieval with inline citations (`[1]`, `[2]`, etc.).
 
@@ -96,6 +96,8 @@ The UI currently provides four main features:
 **Prompts** — Edit the RAG chat's system prompt without code changes. Write a version, diff it against the previous one, and activate it — the very next chat call uses it, no redeploy needed.
 
 **Traces** — View every chat, search, and ingest call with detailed spans (type, latency, tokens, cost, status). Debug prompt and config changes by comparing traces side-by-side.
+
+**Evaluation** — See the RAG quality flow as a visual explanation, run a Golden Dataset, review MRR/Recall/Hit Rate cards, drill into failed queries and retrieved ranks, download JSON Evidence, and compare Baseline/Candidate artifacts for improved and regressed queries.
 
 ### Evaluate retrieval
 
@@ -124,10 +126,11 @@ The bundled synthetic fixtures provide an offline, deterministic metrics demo; s
 - Evaluation Run artifacts, baseline/candidate comparison, regression detection
 - `eval run`, `eval compare`, and user-configured `eval check` CLI commands
 - synchronous evaluation run/compare API foundation
+- customer-readable Evaluation dashboard with KPI cards, failed-query drill-down, and comparison view
 
 ## Planned / in development
 
-- Evaluation and Golden Dataset management UI
+- Golden Dataset editing/version management UI
 - durable Evaluation Run storage and richer score/trace linkage
 - phase-level latency and complete retrieval token/cost accounting
 - deterministic citation checks and explicitly non-ground-truth LLM judge evaluation

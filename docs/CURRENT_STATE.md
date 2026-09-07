@@ -25,7 +25,7 @@ The product is a local-first Go 1.25 application. `cmd/forgeai` boots clean-laye
 - CI: a workflow template exists under `docs/`, not an active `.github/workflows` workflow
 - release/build: Makefile and Docker build exist; automated release workflow is absent
 - vector configuration: only the embedded brute-force implementation is available
-- UI: core RAG operations exist; Evaluation and Golden Dataset screens do not
+- UI before this change: core RAG operations existed; Evaluation and Golden Dataset screens did not
 
 ### PLANNED (before this change)
 
@@ -49,4 +49,4 @@ The product is a local-first Go 1.25 application. `cmd/forgeai` boots clean-laye
 - Evaluation persistence and UI require a later migration; P0 uses stable versioned JSON artifacts.
 - Frontend has lint/build scripts but no typecheck or test script because it is JavaScript and no test runner is configured.
 
-The P0 implementation adds deterministic evaluation without changing the retrieval behavior or introducing a dependency on TechVit private systems.
+The implementation adds deterministic evaluation and an embedded customer-readable Evaluation dashboard without changing retrieval behavior or introducing a dependency on TechVit private systems. Golden Dataset editing and durable run management remain follow-up work.

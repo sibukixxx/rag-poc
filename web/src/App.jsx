@@ -4,12 +4,14 @@ import Chat from './Chat'
 import Knowledge from './Knowledge'
 import Prompts from './Prompts'
 import Traces from './Traces'
+import Evaluation from './Evaluation'
 
 const TABS = [
   { id: 'chat', label: 'Chat', Component: Chat },
   { id: 'knowledge', label: 'Knowledge', Component: Knowledge },
   { id: 'prompts', label: 'Prompts', Component: Prompts },
   { id: 'traces', label: 'Traces', Component: Traces },
+  { id: 'evaluation', label: 'Evaluation', Component: Evaluation },
 ]
 
 function App() {
