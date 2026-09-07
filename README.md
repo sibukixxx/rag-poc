@@ -21,139 +21,164 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — Design decisions, trade-offs, risk assessment
 - [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Free deployment guide (Cloudflare Tunnel + Workers)
 
-## Quick Start
+## Installation
 
 ### Prerequisites
-- Go 1.25+
-- An OpenAI-compatible LLM API (OpenAI, Ollama, etc.)
-- A Linux/macOS/Windows machine
+- Go 1.25+ ([install](https://go.dev/doc/install))
+- An OpenAI-compatible LLM provider (OpenAI, Ollama, LM Studio, etc.)
+- Docker (optional, for containerized deployment)
 
-### 1. Build
+### Build
 
-```sh
+```bash
 make build
 ```
 
-The binary `dist/forgeai` is fully static (CGO_ENABLED=0) and runs everywhere.
+This produces a fully static binary at `dist/forgeai` (CGO_ENABLED=0, no external libc needed).
 
-### 2. Initialize
+## Quick Start
 
-```sh
+### 1. Initialize
+
+```bash
 ./dist/forgeai init
 ```
 
 This generates:
 - `forgeai.yaml` — configuration file
-- A random `FORGEAI_MASTER_KEY` — **save this securely**
+- `FORGEAI_MASTER_KEY` — **save this value securely**
 
-### 3. Configure LLM
+### 2. Configure Your LLM
 
-Set your OpenAI API key (or compatible endpoint):
+Set your API credentials. The easiest way is via environment:
 
-```sh
-export FORGEAI_MASTER_KEY=your_key_from_init
+```bash
+export FORGEAI_MASTER_KEY=<value_from_init>
 export FORGEAI_OPENAI_API_KEY=sk-...
 ```
 
-Or use the interactive prompt:
+Or use the interactive prompt to store securely in the database:
 
-```sh
+```bash
 echo "sk-..." | ./dist/forgeai secret set openai
 ```
 
-### 4. Start the Server
+### 3. Verify Configuration
 
-```sh
-./dist/forgeai doctor     # verify configuration
-./dist/forgeai serve      # starts on http://localhost:8080
+```bash
+./dist/forgeai doctor
 ```
 
-### 5. Open the UI
+This checks your LLM connection, database setup, and master key.
 
-Visit http://localhost:8080 for five tabs:
+### 4. Start the Server
 
-**Chat** — pick an alias (cheap / normal / judge) and chat; each reply
-shows tokens and cost. Every call is recorded as a Trace+Span in SQLite.
-Optionally pick a knowledge base too: each question is then answered by
-Hybrid Search retrieval + an LLM prompted to cite its sources inline
-(`[1]`, `[2]`, ...). Citation chips below the answer expand to show the
-cited chunk's text.
+```bash
+./dist/forgeai serve
+```
 
-**Knowledge** — create a knowledge base and upload a file (PDF, TXT, MD,
-HTML, CSV, JSON). It's loaded, NFKC-normalized, chunked (token-based,
-tiktoken), hashed, and embedded — re-uploading identical content reuses
-the existing embedding instead of re-calling the API. A **Search**
-sub-tab runs Hybrid Search (embedding cosine + FTS5 trigram keyword,
-merged by RRF, with an optional LLM rerank) over the selected knowledge
-base and shows each hit's score, filename, and page.
+Visit http://localhost:8080 to access the interface.
 
-**Prompts** — the RAG chat's system prompt lives here, not in code.
-Write a new version, diff it against the previous one, and activate it —
-the very next RAG chat call uses it, no redeploy needed.
+### 5. Use ForgeAI
 
-**Eval** — create a Golden Dataset (a small, human-verified set of
-questions with known-correct answers — also called an eval set or a
-human-labeled test set; a yardstick for measuring quality, not training
-data) scoped to a knowledge base, import its cases (JSON or CSV, `query` +
-`expected_filenames`, optionally `expected_answer`), and run them through
-the same Hybrid Search a real query uses. Each run reports Recall@K,
-Precision@K, MRR, and Hit Rate, scored by filename match. Turn on **LLM
-Judge** and each question is also answered through the RAG pipeline and
-graded by the `judge` alias for Correctness / Groundedness / Relevance
-(0–1) with a written reason; click a run to drill into low-scoring cases.
-Pick any two finished runs as **A / B** for a Before/After table (quality,
-P95 latency, cost, per-case improvements/regressions, a winner with its
-rationale) and export it as Markdown for a customer-facing report.
-See [examples/](examples/) for a ready-to-run 50-question Japanese sample.
+The UI provides five main features:
 
-**Traces** — every chat, RAG chat, search, and ingest call is recorded
-here with its spans (kind, latency, tokens, cost, status), so you can see
-exactly what a prompt or config change did to behavior.
+**Chat** — Select an LLM alias (cheap / normal / judge) and chat interactively. Each reply shows token counts and API costs, recorded as Traces in SQLite. Optionally select a Knowledge Base to enable Hybrid Search retrieval with inline citations (`[1]`, `[2]`, etc.).
+
+**Knowledge** — Create knowledge bases and upload files (PDF, TXT, MD, HTML, CSV, JSON). Documents are automatically chunked, normalized, and embedded. Identical re-uploads reuse cached embeddings (zero API cost). A **Search** sub-tab runs Hybrid Search (semantic + keyword, merged by RRF) with optional LLM reranking.
+
+**Prompts** — Edit the RAG chat's system prompt without code changes. Write a version, diff it against the previous one, and activate it — the very next chat call uses it, no redeploy needed.
+
+**Eval** — Create a Golden Dataset (human-verified test set) scoped to a knowledge base, import cases (JSON or CSV with `query` + `expected_filenames`), and run them through Hybrid Search. Each run reports Recall@K, Precision@K, MRR, and Hit Rate. Enable **LLM Judge** to grade each answer for Correctness / Groundedness / Relevance. Compare two finished runs as Before/After, analyzing quality/latency/cost with a winner rationale, and export as Markdown. See [examples/](examples/) for a 50-question sample.
+
+**Traces** — View every chat, search, and ingest call with detailed spans (type, latency, tokens, cost, status). Debug prompt and config changes by comparing traces side-by-side.
 
 ## Development
 
-The React UI source is in `web/`. Rebuild after changes:
+### Building the UI
 
-```sh
+The React source is in `web/`. After UI changes, rebuild:
+
+```bash
 cd web && npm run build
 ```
 
-The built output (`web/dist`) is committed, so a plain `go build` works without Node installed.
+The built output is committed, so `go build` works without Node.js.
+
+### Testing
+
+```bash
+make test
+make vet
+```
 
 ## Deployment
 
-### Local (Docker)
+### Local (Docker Compose)
 
-```sh
+For quick self-hosting:
+
+```bash
 cp .env.example .env
-# Edit .env with your FORGEAI_MASTER_KEY and FORGEAI_OPENAI_API_KEY
+# Edit .env with your FORGEAI_MASTER_KEY and API credentials
 docker compose up -d --build
 ```
 
-The `docker-compose.yml` includes:
-- **forgeai** service — the Go binary
-- **cloudflared** tunnel — routes external traffic securely
+This starts:
+- **forgeai** — the application
+- **cloudflared** — Cloudflare Tunnel for secure external access (free)
 
 ### Production (Cloudflare)
 
-ForgeAI works great behind Cloudflare Access (free tier). See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for step-by-step instructions and cost breakdown.
+ForgeAI works well behind Cloudflare Access (free tier) with Cloudflare Tunnel for routing.
 
-**Note:** Workers doesn't support Go + SQLite, so use the Docker approach with Cloudflare Tunnel (free) instead.
+For step-by-step instructions, cost breakdown, and alternative deployment options, see [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md).
+
+**Note:** Cloudflare Workers doesn't support Go + SQLite, so Docker with Tunnel is the recommended approach.
+
+## Architecture
+
+ForgeAI uses clean layered architecture:
+
+```
+cmd/forgeai        ← Main entry point (bootstrap, CLI, API server)
+  ↓
+internal/app       ← Wiring, HTTP server setup
+  ↓
+internal/http      ← Chi router, API handlers, SSE
+internal/usecase   ← Business logic (chat, ingest)
+  ↓
+internal/domain    ← Interfaces only (no external deps)
+  ↓
+internal/adapter   ← Implementations
+  ├─ sqlite        ← Database & embedded migrations
+  ├─ crypto        ← AES-GCM secret storage
+  ├─ openaicompat  ← LLM & embedding client
+  └─ extractor     ← PDF, HTML, text parsing
+```
+
+See [AGENTS.md](AGENTS.md) for detailed design decisions and conventions.
 
 ## v0.1 Roadmap
 
 ```
-Document Upload  →  Hybrid Search  →  Golden Dataset Eval  →  Before/After Comparison  →  API Deployment
-        ↓               ↓                      ↓                      ↓                           ↓
-   PDF/TXT/MD/   Japanese-aware        50 eval questions      Quality/Cost/Latency      /runtime/v1/chat
-   HTML/CSV/JSON  semantic + BM25      (retrieval + LLM)      metrics (side-by-side)    endpoints
+Upload Documents  →  Semantic Search  →  Golden Dataset Eval  →  Quality Analysis  →  Deploy API
+       ↓                   ↓                      ↓                    ↓                  ↓
+  PDF/TXT/MD/      Hybrid (BM25 +          50 benchmark          Side-by-side       /runtime/v1
+  HTML/CSV/JSON    vectors, multi-lang)    questions             Before/After        chat endpoints
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for weekly milestones.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the 12-week development plan.
 
 ## License
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+## Contributing
+
+We welcome pull requests and issues! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+For security issues, see [SECURITY.md](SECURITY.md).
 
 ---
 
