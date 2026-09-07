@@ -19,7 +19,7 @@ type memKnowledgeStore struct {
 	mu         sync.Mutex
 	kbs        map[string]knowledge.KnowledgeBase
 	docs       map[string]knowledge.Document
-	chunks     map[string][]knowledge.Chunk // documentID -> chunks
+	chunks     map[string][]knowledge.Chunk    // documentID -> chunks
 	embeddings map[string]map[string][]float32 // hash -> model -> vector
 }
 
@@ -159,7 +159,9 @@ func (passthroughLoader) Load(ctx context.Context, data []byte, meta knowledge.F
 
 type staticLoaders struct{ loader knowledge.Loader }
 
-func (s staticLoaders) Find(filename, mimeType string) (knowledge.Loader, bool) { return s.loader, true }
+func (s staticLoaders) Find(filename, mimeType string) (knowledge.Loader, bool) {
+	return s.loader, true
+}
 
 // countingEmbedder records how many times Embed was called and how many
 // texts it was asked to embed in total, so tests can assert the

@@ -48,13 +48,20 @@ func (a *App) Serve() error {
 	keywordSearcher := sqlite.NewFTSStore(a.DB)
 	reranker := llmrerank.New(router, "cheap")
 	search := usecase.NewSearchUseCase(vectorSearcher, keywordSearcher, embedder, reranker, traces)
-	evaluate := &usecase.EvaluateUseCase{Searcher: search, Version: Version, EmbeddingModel: a.Config.Embedding.Model}
 
 	promptStore := sqlite.NewPromptStore(a.DB)
 	if err := seedDefaultPrompts(context.Background(), promptStore); err != nil {
 		return fmt.Errorf("seeding default prompts: %w", err)
 	}
 	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok, promptStore)
+
+	// Golden Dataset + Retrieval evaluation (docs/ROADMAP.md W7). Reuses
+	// the same SearchUseCase a real query would go through, so a run's
+	// metrics reflect production retrieval behavior exactly.
+	datasets := sqlite.NewEvalStore(a.DB)
+	judge := usecase.NewLLMJudge(router, prices, traces, promptStore)
+	evalUC := usecase.NewEvaluationUseCase(search, ragChat, judge, datasets, traces)
+	compareUC := usecase.NewCompareUseCase(datasets)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
@@ -66,7 +73,9 @@ func (a *App) Serve() error {
 		RAGChat:   ragChat,
 		Prompts:   promptStore,
 		Traces:    traces,
-		Evaluation: evaluate,
+		Datasets:  datasets,
+		Eval:      evalUC,
+		Compare:   compareUC,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)

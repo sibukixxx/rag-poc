@@ -4,7 +4,7 @@ import Chat from './Chat'
 import Knowledge from './Knowledge'
 import Prompts from './Prompts'
 import Traces from './Traces'
-import Evaluation from './Evaluation'
+import Eval from './Eval'
 import ServiceIcon from './ServiceIcon'
 
 const TABS = [
@@ -46,7 +46,7 @@ const TABS = [
     english: 'Evaluation',
     description: '検索品質の改善と悪化を数字で証明',
     purpose: '品質を証明する',
-    Component: Evaluation,
+    Component: Eval,
   },
 ]
 
