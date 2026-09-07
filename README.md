@@ -99,6 +99,8 @@ The UI currently provides five main features:
 
 **Evaluation** — See the RAG quality flow as a visual explanation, run a Golden Dataset, review MRR/Recall/Hit Rate cards, drill into failed queries and retrieved ranks, download JSON Evidence, and compare Baseline/Candidate artifacts for improved and regressed queries.
 
+The navigation separates these capabilities with dedicated icons, colors, Japanese role names, and one-line purpose descriptions so a non-engineering customer can distinguish “add knowledge”, “ask”, “control behavior”, “inspect execution”, and “prove quality” at a glance.
+
 ### Evaluate retrieval
 
 Run the live retrieval pipeline against a Golden Dataset:

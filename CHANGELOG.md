@@ -10,3 +10,4 @@ All notable changes are documented here. The project follows semantic versioning
 - Add query-level evidence, failures, baseline/candidate comparison, and regression detection.
 - Add schema v1 JSON artifacts, evaluation CLI/API foundation, synthetic fixtures, and metric tests.
 - Add a visual Evaluation dashboard with KPI cards, query-level drill-down, artifact download, and baseline/candidate comparison.
+- Replace the undifferentiated text tabs with color-coded service cards, dedicated SVG icons, Japanese role names, and plain-language descriptions.
