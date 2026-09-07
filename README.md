@@ -271,7 +271,7 @@ export FORGEAI_OPENAI_API_KEY=sk-...
 - **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
   （種別・レイテンシ・トークン・コスト・状態）で確認可能
 
-Evaluation UIは未実装です。現時点ではCLI/APIとJSON Artifactを利用してください。詳細は [docs/EVALUATION.md](docs/EVALUATION.md) を参照してください。
+**品質評価**画面では、評価の流れを図で確認し、Golden Datasetの実行、KPI表示、失敗Queryの検索順位確認、Evidence JSONの保存、Baseline/Candidate比較ができます。内蔵サンプルを使えば事前準備なしでデモできます。Golden Datasetの画面編集とRunの永続管理は今後の対応です。
 
 ### デプロイ
 
