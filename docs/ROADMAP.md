@@ -129,22 +129,120 @@ v0.1 は 12 週。詰まったら週番号をずらすのではなく、その�
   search系traceのcostが¥0固定で表示されることをE2E確認時に発見。SearchUseCaseの
   コンストラクタ変更が複数箇所に波及するため、W6の変更範囲としては見送り
 
-### W7: Golden Dataset + Retrieval 評価
-- datasets / dataset_cases、JSON / CSV インポート（UI + CLI）
-- Evaluation Runner（非同期 job）: Recall@K / Precision@K / MRR / Hit Rate
-- `examples/` に日本語サンプル文書 + 50問 Golden Dataset を作る（実データ整備も工数）
-- **完了条件**: `forgeai eval run demo-golden` で Retrieval Hit Rate が出る
+### W7: Golden Dataset + Retrieval 評価 ✅ 完了
+- `internal/domain/eval` + `internal/adapter/sqlite/eval_store.go`: `datasets`/`dataset_cases`/
+  `evaluation_runs`/`evaluation_results` テーブル（migration 0006）。`Dataset`は1つの
+  knowledge base に紐づき、`Case`は expected_filenames（文書ID ではなく **filename** で
+  期待文書を保持）を持つ。再取り込みで document ID が変わっても golden dataset が
+  壊れないようにするための設計判断
+- JSON（`{"cases":[{query, expected_filenames}]}` or 配列そのまま）/ CSV（`query,
+  expected_filenames` ヘッダ、複数ファイル名は`|`区切り）インポートを共通パーサ
+  （`internal/usecase/dataset_import.go`）としてHTTP/CLI両方から利用
+- `internal/usecase/evaluate.go`: `EvaluationUseCase` が dataset の各 case を
+  `SearchUseCase`（本番と同じ Hybrid Search）に通し、文書名ベースで
+  Recall@K / Precision@K / MRR(reciprocal rank) / Hit Rate を計算。1ケースの
+  検索失敗は fail-soft（そのケースを0点扱いにして残り49問の評価は継続）
+- API: `POST/GET /api/v1/datasets`, `POST/GET /api/v1/datasets/:id/cases`,
+  `POST /api/v1/evaluations`（`CreateRun`即座に返し、`Execute`はgoroutineで
+  バックグラウンド実行 = 非同期 job）, `GET /api/v1/evaluations/:id`（進捗+結果),
+  `GET /api/v1/evaluations?dataset_id=`（run一覧）
+- CLI: `forgeai ingest <dir> -kb <slug>`（ディレクトリ内ファイルをまとめて取り込み。
+  HTTPアップロード無しでデモを完結させるためW7で追加）、
+  `forgeai eval import -kb <slug> <dataset-name> <file.json|csv>`,
+  `forgeai eval run [-top-k N] [-rerank] <dataset-name>`（同期実行し
+  Recall@K/Precision@K/MRR/Hit Rateを標準出力に表示）
+- UI: 新規 Eval タブ（dataset作成、cases インポート、top_k/rerank指定でのrun実行、
+  run履歴テーブル）
+- `examples/docs/`: 架空ECショップのサポート文書8本（返品/配送/支払い/アカウント/
+  保証/商品/問い合わせ/FAQ）+ `examples/golden-dataset.json`（50問、日本語）
+- **完了条件**: `forgeai eval run demo-golden` で Retrieval Hit Rate が出る → 確認済み
+  （モックサーバで `forgeai ingest ./examples/docs -kb demo` →
+  `forgeai eval import -kb demo demo-golden ./examples/golden-dataset.json` →
+  `forgeai eval run demo-golden` で Recall@K 1.000 / Hit Rate 1.000 / MRR 0.409 を確認。
+  HTTP API 経由でも同じ dataset に対して非同期 run を作成→ポーリングで `done` 到達を確認、
+  CSRFガードが新規POSTルートにも効いていることを確認。ブラウザ(Playwright)でも
+  EvalタブのRun履歴表示とRun実行ボタンの動作を確認。全Go単体テスト緑）
+- **既知の積み残し**（W7スコープ外）: この smoke test はモック埋め込み（内容に依らず
+  ほぼ固定ベクトル）を使っており、Recall/Hit Rateの高さは主にFTS5キーワード検索の
+  貢献による。実LLM/埋め込みでの評価はローカル環境での再検証が必要
 
-### W8: LLM Judge 評価
-- Judge（alias: judge、judge プロンプトもバージョン管理）
-- Correctness / Groundedness / Relevance + reason 保存
-- run 詳細 UI（ケース別スコア、失敗ケースのドリルダウン）
-- **完了条件**: 50問の judge 評価が完走し、低スコアケースの理由が読める
+### W8: LLM Judge 評価 ✅ 完了
+- `internal/usecase/judge.go`: `LLMJudge`。alias `judge` で Correctness / Groundedness /
+  Relevance（各 0.0–1.0）+ reason を JSON で返させ、コードフェンスや前置き付きの応答も
+  最初の `{...}` を抜いて許容。範囲外スコアは [0,1] にクランプ。rerank と違い
+  **fail-soft にしない**（パース失敗・API失敗は error として返す。判定不能を 0 点として
+  黙って集計するより「判定できなかった」と記録する方が評価として正直）
+- judge プロンプトは Prompt Registry の `rag_judge`（起動時に v1 をシード、F-11）。
+  各 `evaluation_results` 行が `judge_model` / `judge_prompt_version` を持つので
+  「judge を厳しくしたら数字が下がった」を後から追える
+- `RAGChatUseCase.Answer`: ChatStream の非ストリーミング版。評価用に本番と同じ
+  retrieval + 同じ registry プロンプト + 同じ alias で1回の Generate。判定用に
+  「モデルが実際に見た context 文字列」も返す
+- `EvaluationUseCase`: `RunOptions{TopK, Rerank, Judge, Alias}`。Judge 時は各ケースで
+  retrieval 採点 → `Answer` → `Judge` を実行し、per-case の answer / 3スコア / reason /
+  cost / latency を保存、run に平均スコアと合計コストを集計。1ケースの answer/judge
+  失敗は error として記録して残りを続行（W7 と同じ fail-soft）
+- migration 0007: `dataset_cases.expected_answer`（任意。無い場合は judge が context
+  との整合で correctness を判定）、`evaluation_runs` に judge/alias/3スコア/cost_usd、
+  `evaluation_results` に answer/3スコア/judge_reason/judge_model/judge_prompt_version/
+  cost_usd/duration_ms（W9 の P95 レイテンシ・コスト比較用に今から記録）
+- API: `POST /api/v1/evaluations` に `judge` / `alias`。`GET /api/v1/evaluations/:id` の
+  results に query / expected / answer / スコア / reason を同梱（run 詳細 UI が1往復で描ける）
+- CLI: `forgeai eval run -judge [-alias normal] <dataset>`。集計に加えて
+  **スコア 0.5 以下またはエラーのケースを answer + reason 付きで列挙**
+- UI: Eval タブの run 一覧に judge 列（Correct./Grounded./Relev./Cost）、run クリックで
+  ケース別テーブル、「Only failed / low-scoring cases」フィルタ、行クリックで
+  expected / retrieved / answer / judge reason を展開
+- `examples/golden-dataset.json` の 50 問すべてに `expected_answer` を追加
+- **完了条件**: 50問の judge 評価が完走し、低スコアケースの理由が読める → 確認済み
+  （judge 応答を返すモックサーバで `forgeai eval run -judge demo-golden-v2` が 50 問完走、
+  Correctness 0.690 / Groundedness 0.820 / Relevance 0.740 / Cost $0.00195 を集計し、
+  低スコア 15 件を reason 付きで列挙。既存 DB への migration 0007（ALTER TABLE）適用も
+  この run で確認。HTTP API で `judge:true` の非同期 run → done、Playwright で Eval タブ
+  から judge run 起動 → 詳細で 15 件フラグ → 1件展開で answer/reason 表示を確認。
+  Go 単体テスト全緑（judge パース/クランプ/エラー、judge run の集計とケース単位の
+  fail-soft を含む））
+- **既知の積み残し**: judge run は retrieval 採点用の Search と `Answer` 内の Search で
+  クエリ埋め込みを2回呼ぶ（top_k が違うため）。コスト影響は小さいが W9 以降で
+  結果を共有する形に寄せられる
 
-### W9: Experiment 比較
-- run 間比較 API + UI（品質 / Groundedness / P95 レイテンシ / コスト、Winner 表示）
-- 比較結果の Markdown エクスポート（顧客向け成果報告の種）
-- **完了条件**: 設定を変えた 2 run の Before/After 表が出て、エクスポートできる
+### W9: Experiment 比較 ✅ 完了
+- `internal/usecase/compare.go`: `CompareUseCase.Compare(a, b)`。同一 dataset の done な
+  2 run を読み、`BuildComparison`（純関数、単体テスト対象）で Before/After を組み立てる
+  - run ごとの `RunSummary`: 既存の品質メトリクスに加え、per-case `duration_ms` から
+    平均 / **P95 レイテンシ**（nearest-rank）、`cost_usd` から合計 / 平均コストを算出
+  - メトリクス行（`MetricDelta`）: Hit Rate / Recall@K / Precision@K / MRR /
+    Correctness / Groundedness / Relevance / 平均・P95 レイテンシ / 合計・平均コスト。
+    各行に A/B/Δ と行単位の Better（tie 帯: 品質 0.005、レイテンシ 1ms、コスト 1e-6）。
+    judge メトリクスは **両方が judge run のときだけ** `Available`（片方だけ判定済みの
+    比較で 0 点扱いにしない）
+  - **Winner**: 利用可能な「高いほど良い」メトリクスの平均で決め、同点ならコストが安い方。
+    根拠を1文（`Rationale`）で返す
+  - ケース単位の diff（`CaseDelta`）: hit / reciprocal rank / judge 平均で
+    improved / regressed / mixed / same を判定し、集計（improved N, regressed M）
+- `RenderComparisonMarkdown`: 顧客向け成果報告の種になる Markdown（Runs 表、Metrics 表、
+  Winner + 根拠、Changed cases 表。query 中の `|` はエスケープ）
+- API: `GET /api/v1/evaluations/compare?a=&b=`（JSON、`markdown` フィールド同梱）、
+  `&format=markdown` で `text/markdown` + `Content-Disposition: attachment`。
+  `/evaluations/compare` は `/evaluations/{id}` より先に登録して "compare" を ID と
+  誤解釈させない。異なる dataset / 未完了 run / 同一 run は 400
+- CLI: `forgeai eval list <dataset>`（run ID と設定・主要メトリクス一覧）、
+  `forgeai eval compare [-markdown] [-o report.md] <run-a> <run-b>`
+- UI: Eval タブの run 一覧に A/B ラジオ（done の run のみ選択可）→ 選ぶと Before/After
+  パネル（Winner バッジ + 根拠、メトリクス表、improved/regressed 集計、changed cases 表、
+  **Download Markdown** / **Copy Markdown**）
+- **完了条件**: 設定を変えた 2 run の Before/After 表が出て、エクスポートできる → 確認済み
+  （モックで run A `judge, alias=cheap` と run B `rerank, judge, alias=normal` を作成。
+  `forgeai eval compare A B` で Hit Rate 1.000→0.140 / MRR 0.409→0.140 / Correctness
+  0.690→0.704 の表と Winner: A（mean quality 0.684 vs 0.406）、6 improved / 33 regressed
+  を表示。`-o report.md` で Markdown 出力。HTTP JSON と `format=markdown`（添付ヘッダ付き）
+  を確認、Playwright で A/B 選択 → パネル描画 → Download リンクが text/markdown を返すことを
+  確認。単体テストは winner 判定・コストでのタイブレーク・judge 行の非表示・Markdown
+  出力・入力検証をカバー）
+- **検証時の知見**: run B の Hit Rate 低下はモックの回答文に `[1]` が含まれるため
+  reranker が「候補 1 だけが関連」と解釈した結果（reranker の仕様通り）。比較機能の
+  デモとしては本物の regression が出て好都合だった。またモックは応答が 1ms 未満のため
+  レイテンシ列が 0 になる（実プロバイダでは意味のある値になる）
 
 ### W10: Deployment + Runtime API
 - deployments（設定スナップショット = prompt vN + alias + retriever 設定）

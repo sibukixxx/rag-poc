@@ -498,3 +498,78 @@
   font-size: 0.95rem;
   margin: 0 0 8px;
 }
+
+.eval-case-detail td {
+  background: var(--assistant-bg);
+  font-size: 0.85rem;
+}
+
+.eval-case-detail p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+
+.ab-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.compare-panel h3 .winner {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--assistant-bg);
+}
+
+.compare-rationale {
+  font-weight: normal;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.compare-config {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
+
+.compare-table td.winner-a,
+.compare-table td.winner-b {
+  font-weight: 600;
+}
+
+.compare-table td.winner-b {
+  color: #16a34a;
+}
+
+.compare-table td.winner-a {
+  color: #2563eb;
+}
+
+.compare-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 10px 0;
+  font-size: 0.85rem;
+}
+
+.compare-actions a.link-button {
+  text-decoration: none;
+}
+
+.doc-row.verdict-improved td:first-child {
+  color: #16a34a;
+}
+
+.doc-row.verdict-regressed td:first-child {
+  color: var(--error-fg);
+}
+
+.doc-row.verdict-mixed td:first-child {
+  color: #d97706;
+}

@@ -23,6 +23,7 @@ const (
 	SpanKindEmbed    SpanKind = "embed"
 	SpanKindRetrieve SpanKind = "retrieve"
 	SpanKindRerank   SpanKind = "rerank"
+	SpanKindJudge    SpanKind = "judge"
 )
 
 // Span is one unit of work inside a Trace (e.g. a single LLM call).

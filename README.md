@@ -81,13 +81,15 @@ Visit http://localhost:8080 to access the interface.
 
 ### 5. Use ForgeAI
 
-The UI provides four main features:
+The UI provides five main features:
 
 **Chat** — Select an LLM alias (cheap / normal / judge) and chat interactively. Each reply shows token counts and API costs, recorded as Traces in SQLite. Optionally select a Knowledge Base to enable Hybrid Search retrieval with inline citations (`[1]`, `[2]`, etc.).
 
 **Knowledge** — Create knowledge bases and upload files (PDF, TXT, MD, HTML, CSV, JSON). Documents are automatically chunked, normalized, and embedded. Identical re-uploads reuse cached embeddings (zero API cost). A **Search** sub-tab runs Hybrid Search (semantic + keyword, merged by RRF) with optional LLM reranking.
 
 **Prompts** — Edit the RAG chat's system prompt without code changes. Write a version, diff it against the previous one, and activate it — the very next chat call uses it, no redeploy needed.
+
+**Eval** — Create a Golden Dataset (human-verified test set) scoped to a knowledge base, import cases (JSON or CSV with `query` + `expected_filenames`), and run them through Hybrid Search. Each run reports Recall@K, Precision@K, MRR, and Hit Rate. Enable **LLM Judge** to grade each answer for Correctness / Groundedness / Relevance. Compare two finished runs as Before/After, analyzing quality/latency/cost with a winner rationale, and export as Markdown. See [examples/](examples/) for a 50-question sample.
 
 **Traces** — View every chat, search, and ingest call with detailed spans (type, latency, tokens, cost, status). Debug prompt and config changes by comparing traces side-by-side.
 
@@ -215,6 +217,16 @@ export FORGEAI_OPENAI_API_KEY=sk-...
   ベクトル+キーワードのハイブリッド検索を単独実行可能
 - **Prompts** — RAG チャットのシステムプロンプトをコード変更なしで編集・
   バージョン管理・切り替え（diff 表示付き）
+- **Eval** — ナレッジベースに紐づく Golden Dataset（人手で正解を検証した
+  少量の評価用データ。eval set / human-labeled test set とも呼ばれる。
+  学習データではなく品質を測る「ものさし」）を作成し、ケース
+  （query + expected_filenames）を JSON/CSV でインポート。実際の検索と同じ
+  Hybrid Search で評価を実行し、Recall@K / Precision@K / MRR / Hit Rate を表示。
+  **LLM Judge** を有効にすると各質問に RAG で回答し、`judge` alias が
+  Correctness / Groundedness / Relevance（0〜1）と理由を採点。run をクリックすると
+  低スコアケースを理由付きで確認できる。完了した run を 2 つ **A / B** に選ぶと
+  Before/After 表（品質・P95 レイテンシ・コスト・ケース単位の改善/悪化・Winner と根拠）が
+  出て、Markdown でエクスポートできる（日本語50問のサンプルは [examples/](examples/) 参照）
 - **Traces** — chat / RAG chat / search / ingest の全呼び出しを span 単位
   （種別・レイテンシ・トークン・コスト・状態）で確認可能
 

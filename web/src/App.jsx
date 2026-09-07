@@ -3,12 +3,14 @@ import './App.css'
 import Chat from './Chat'
 import Knowledge from './Knowledge'
 import Prompts from './Prompts'
+import Eval from './Eval'
 import Traces from './Traces'
 
 const TABS = [
   { id: 'chat', label: 'Chat', Component: Chat },
   { id: 'knowledge', label: 'Knowledge', Component: Knowledge },
   { id: 'prompts', label: 'Prompts', Component: Prompts },
+  { id: 'eval', label: 'Eval', Component: Eval },
   { id: 'traces', label: 'Traces', Component: Traces },
 ]
 
