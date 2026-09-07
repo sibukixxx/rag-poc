@@ -1,0 +1,8 @@
+{
+  "返品期限は何日ですか？":[{"ChunkID":"returns-window","DocumentID":"returns","Score":0.95}],
+  "配送にかかる日数と料金は？":[{"ChunkID":"shipping-time","DocumentID":"shipping","Score":0.9},{"ChunkID":"shipping-price","DocumentID":"shipping","Score":0.8}],
+  "保証の対象期間は？":[{"ChunkID":"warranty-period","DocumentID":"warranty","Score":0.8}],
+  "海外返品の送料負担は？":[{"ChunkID":"international-return-cost","DocumentID":"returns","Score":0.7}],
+  "法人向け一括請求に対応していますか？":[],
+  "いつまで？":[{"ChunkID":"other","DocumentID":"faq","Score":0.8},{"ChunkID":"returns-window","DocumentID":"returns","Score":0.6}]
+}
