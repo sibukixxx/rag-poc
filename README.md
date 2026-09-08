@@ -16,6 +16,7 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 
 ## Documentation
 
+- [docs/USER_MANUAL_JA.md](docs/USER_MANUAL_JA.md) — 日本語の導入・画面操作・評価・運用マニュアル
 - [docs/V0.1_SPEC.md](docs/V0.1_SPEC.md) — Complete v0.1 specification (scope, API, schema, acceptance criteria)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 12-week development roadmap
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — Design decisions, trade-offs, risk assessment
