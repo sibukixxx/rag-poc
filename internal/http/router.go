@@ -50,6 +50,7 @@ type Deps struct {
 	Datasets  eval.Store
 	Eval      *usecase.EvaluationUseCase
 	Compare   *usecase.CompareUseCase
+	DemoAuth  *handler.DemoAuthHandler
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -67,39 +68,61 @@ func NewRouter(deps Deps) http.Handler {
 	prompts := handler.NewPromptHandler(deps.Prompts)
 	traces := handler.NewTraceHandler(deps.Traces)
 	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval, deps.Compare)
+	demoAuth := deps.DemoAuth
+
+	if demoAuth != nil {
+		r.Get("/login", demoAuth.LoginPage)
+		r.Route("/auth", func(r chi.Router) {
+			r.Use(denyCrossSite)
+			r.Use(chimiddleware.Throttle(maxInflight))
+			r.Get("/me", demoAuth.Me)
+			r.With(limitBody(16<<10)).Post("/login", demoAuth.Login)
+			r.Post("/logout", demoAuth.Logout)
+		})
+	}
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(denyCrossSite)
 		r.Use(chimiddleware.Throttle(maxInflight))
 
 		r.Get("/health", health.Check)
-		r.With(limitBody(maxJSONBody)).Post("/chat", chat.Stream)
-		r.With(limitBody(maxJSONBody)).Post("/knowledge-bases", kb.CreateKnowledgeBase)
-		r.Get("/knowledge-bases", kb.ListKnowledgeBases)
-		r.With(limitBody(maxUploadBody)).Post("/knowledge-bases/{id}/documents", kb.UploadDocument)
-		r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
-		r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/search", kb.Search)
-		r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/chat", kb.Chat)
-		r.With(limitBody(maxJSONBody)).Post("/prompts", prompts.Create)
-		r.Get("/prompts", prompts.List)
-		r.Get("/prompts/{id}/versions", prompts.ListVersions)
-		r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/versions", prompts.CreateVersion)
-		r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/activate", prompts.Activate)
-		r.Get("/traces", traces.List)
-		r.Get("/traces/{id}", traces.Get)
-		r.With(limitBody(maxJSONBody)).Post("/datasets", evaluations.CreateDataset)
-		r.Get("/datasets", evaluations.ListDatasets)
-		r.With(limitBody(maxDatasetImportBody)).Post("/datasets/{id}/cases", evaluations.ImportCases)
-		r.Get("/datasets/{id}/cases", evaluations.ListCases)
-		r.With(limitBody(maxJSONBody)).Post("/evaluations", evaluations.CreateEvaluation)
-		r.Get("/evaluations", evaluations.ListEvaluations)
-		// Static segment registered before {id} so "compare" is never
-		// parsed as a run ID.
-		r.Get("/evaluations/compare", evaluations.CompareEvaluations)
-		r.Get("/evaluations/{id}", evaluations.GetEvaluation)
+		r.Group(func(r chi.Router) {
+			if demoAuth != nil {
+				r.Use(demoAuth.Require)
+			}
+			r.With(limitBody(maxJSONBody)).Post("/chat", chat.Stream)
+			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases", kb.CreateKnowledgeBase)
+			r.Get("/knowledge-bases", kb.ListKnowledgeBases)
+			r.With(limitBody(maxUploadBody)).Post("/knowledge-bases/{id}/documents", kb.UploadDocument)
+			r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
+			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/search", kb.Search)
+			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/chat", kb.Chat)
+			r.With(limitBody(maxJSONBody)).Post("/prompts", prompts.Create)
+			r.Get("/prompts", prompts.List)
+			r.Get("/prompts/{id}/versions", prompts.ListVersions)
+			r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/versions", prompts.CreateVersion)
+			r.With(limitBody(maxJSONBody)).Post("/prompts/{id}/activate", prompts.Activate)
+			r.Get("/traces", traces.List)
+			r.Get("/traces/{id}", traces.Get)
+			r.With(limitBody(maxJSONBody)).Post("/datasets", evaluations.CreateDataset)
+			r.Get("/datasets", evaluations.ListDatasets)
+			r.With(limitBody(maxDatasetImportBody)).Post("/datasets/{id}/cases", evaluations.ImportCases)
+			r.Get("/datasets/{id}/cases", evaluations.ListCases)
+			r.With(limitBody(maxJSONBody)).Post("/evaluations", evaluations.CreateEvaluation)
+			r.Get("/evaluations", evaluations.ListEvaluations)
+			// Static segment registered before {id} so "compare" is never
+			// parsed as a run ID.
+			r.Get("/evaluations/compare", evaluations.CompareEvaluations)
+			r.Get("/evaluations/{id}", evaluations.GetEvaluation)
+		})
 	})
 
-	r.Handle("/*", noDirListing(staticHandler()))
+	r.Group(func(r chi.Router) {
+		if demoAuth != nil {
+			r.Use(demoAuth.RequirePage)
+		}
+		r.Handle("/*", noDirListing(staticHandler()))
+	})
 
 	return r
 }

@@ -17,6 +17,8 @@ services:
     environment:
       FORGEAI_MASTER_KEY: ${FORGEAI_MASTER_KEY:?FORGEAI_MASTER_KEY を .env に設定してください (forgeai init で生成)}
       FORGEAI_OPENAI_API_KEY: ${FORGEAI_OPENAI_API_KEY:-}
+      FORGEAI_DEMO_AUTH_ENABLED: ${FORGEAI_DEMO_AUTH_ENABLED:-false}
+      FORGEAI_REQUIRE_CLOUDFLARE_ACCESS: ${FORGEAI_REQUIRE_CLOUDFLARE_ACCESS:-false}
       # FORGEAI_PORT / FORGEAI_DB_PATH / FORGEAI_STORAGE_PATH は Dockerfile の既定値を使う
     volumes:
       - forgeai-data:/data

@@ -9,6 +9,7 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
 	"github.com/sibukixxx/rag-poc/internal/adapter/vecmem"
+	"github.com/sibukixxx/rag-poc/internal/domain/demoaccess"
 	"github.com/sibukixxx/rag-poc/internal/domain/eval"
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
@@ -18,6 +19,12 @@ import (
 // commands (`forgeai ingest`) that don't need the full HTTP server.
 func (a *App) Knowledge() knowledge.Store {
 	return sqlite.NewKnowledgeStore(a.DB)
+}
+
+// DemoAccess returns the customer-demo account store used by the server and
+// by `forgeai demo-user` administration commands.
+func (a *App) DemoAccess() demoaccess.Store {
+	return sqlite.NewDemoAccessStore(a.DB)
 }
 
 // Datasets returns the eval.Store for CLI commands that only read runs

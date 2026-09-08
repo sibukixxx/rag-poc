@@ -48,6 +48,14 @@ We will acknowledge receipt within 48 hours and provide updates within 7 days.
 - CSP and X-Frame-Options headers set
 - `CF-Connecting-IP` trusted only when running behind Cloudflare
 
+### Customer Demo Authentication
+
+- Optional application authentication is enabled with `FORGEAI_DEMO_AUTH_ENABLED=true`
+- Each customer receives a separate, expiring account; passwords are stored as salted PBKDF2-SHA256 hashes
+- Session tokens are random, stored only as SHA-256 hashes, and sent in HttpOnly + SameSite=Strict cookies
+- `FORGEAI_REQUIRE_CLOUDFLARE_ACCESS=true` binds each app account to the matching Access-authenticated email
+- Revoking a demo user deletes all of that user's active sessions
+
 ### SSRF Prevention
 
 - HTTP/HTTPS only (no file://, ftp://, etc.)
@@ -58,7 +66,7 @@ We will acknowledge receipt within 48 hours and provide updates within 7 days.
 
 ## Deployment Hardening
 
-- Always deploy behind Cloudflare Access (no app-level authentication yet)
+- Always deploy customer demos behind Cloudflare Access and enable ForgeAI demo authentication
 - Run with minimal permissions: read-only database files, write-only to embeddings cache
 - Monitor `forgeai doctor` output for configuration issues
 - Rotate `FORGEAI_MASTER_KEY` periodically (invalidates all stored secrets)
@@ -67,7 +75,7 @@ We will acknowledge receipt within 48 hours and provide updates within 7 days.
 
 - **v0.1 Alpha**: API and config may change without notice
 - **No multi-tenancy**: Single master key for all secrets
-- **No request authentication**: Rely on Cloudflare Access in production
+- **No tenant isolation**: Demo accounts share one ForgeAI workspace; use only approved sample data
 - **LLM model choice**: Providers and models impact security; use trusted models only
 
 ## Supported Versions

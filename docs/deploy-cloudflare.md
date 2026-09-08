@@ -43,14 +43,16 @@ Cloudflare ダッシュボード → **Zero Trust** → **Networks** → **Tunne
 
 ### 3. Access で認証を前置する(必須)
 
-ForgeAI v0.1 の API(`/api/v1/*`)には**アプリ側の認証がまだ無い**(セッション認証は docs/ROADMAP.md の後続週で実装予定)。公開したままだと誰でもチャットして LLM 費用を消費できるので、Access で保護する。
+Cloudflare Tunnel は通信経路を作る機能であり、メールアドレスの許可判定は Cloudflare Access が行う。顧客デモでは Access と ForgeAI の期限付き個別アカウントを併用する。
 
 Zero Trust → **Access** → **Applications** → **Add an application** → Self-hosted:
 
 - Application domain: `forgeai.<あなたのドメイン>`
-- Policy: Allow / Include → Emails → 自分のメールアドレス(または Emails ending in → 自社ドメイン)
+- Policy: Allow / Include → Emails → 申込者の勤務先メールアドレス
 
-これで初回アクセス時にメール OTP が求められ、許可したメールアドレス以外は到達できなくなる。
+One-time PIN をログイン方法として有効にすると、初回アクセス時にメール OTP が求められ、許可したメールアドレス以外は到達できなくなる。顧客企業のメールドメイン全体ではなく、申込者のメールアドレスを1件ずつ登録する。
+
+ForgeAI側の個別ID発行と失効を含む手順は [demo-access.md](demo-access.md) を参照。
 
 ### 4. ホスト側で起動
 
@@ -58,7 +60,9 @@ Zero Trust → **Access** → **Applications** → **Add an application** → Se
 git clone https://github.com/sibukixxx/rag-poc.git && cd rag-poc
 cp .env.example .env
 make build && ./dist/forgeai init        # マスターキーを生成(Go が無ければ後述の docker run で代用)
-# .env に FORGEAI_MASTER_KEY / FORGEAI_OPENAI_API_KEY / TUNNEL_TOKEN を記入
+# .env にキーとTunnelトークンを記入し、顧客デモでは次も true にする
+# FORGEAI_DEMO_AUTH_ENABLED=true
+# FORGEAI_REQUIRE_CLOUDFLARE_ACCESS=true
 docker compose up -d --build            # または make up
 docker compose logs -f cloudflared      # "Registered tunnel connection" が出れば接続済み
 ```

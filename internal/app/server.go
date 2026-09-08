@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
 	"github.com/sibukixxx/rag-poc/internal/adapter/vecmem"
 	forgehttp "github.com/sibukixxx/rag-poc/internal/http"
+	forgehandler "github.com/sibukixxx/rag-poc/internal/http/handler"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
@@ -62,6 +64,10 @@ func (a *App) Serve() error {
 	judge := usecase.NewLLMJudge(router, prices, traces, promptStore)
 	evalUC := usecase.NewEvaluationUseCase(search, ragChat, judge, datasets, traces)
 	compareUC := usecase.NewCompareUseCase(datasets)
+	demoAuthEnabled := envBool("FORGEAI_DEMO_AUTH_ENABLED")
+	requireCloudflare := envBool("FORGEAI_REQUIRE_CLOUDFLARE_ACCESS")
+	demoAuthUC := usecase.NewDemoAccessUseCase(sqlite.NewDemoAccessStore(a.DB), usecase.DefaultDemoSessionDuration)
+	demoAuthHandler := forgehandler.NewDemoAuthHandler(demoAuthUC, demoAuthEnabled, requireCloudflare)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:        a.DB,
@@ -76,6 +82,7 @@ func (a *App) Serve() error {
 		Datasets:  datasets,
 		Eval:      evalUC,
 		Compare:   compareUC,
+		DemoAuth:  demoAuthHandler,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
@@ -111,4 +118,13 @@ func (a *App) Serve() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(ctx)
+}
+
+func envBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
