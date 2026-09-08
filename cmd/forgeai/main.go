@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/term"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
@@ -42,6 +44,8 @@ func main() {
 		cmdIngest(os.Args[2:])
 	case "eval":
 		cmdEval(os.Args[2:])
+	case "demo-user":
+		cmdDemoUser(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -83,9 +87,120 @@ Usage:
                                    Before/After of two runs on the same dataset:
                                    quality, P95 latency, cost, winner, changed cases.
                                    -markdown prints (or -o writes) the report.
+  forgeai demo-user create [-config path] -email <email> -company <name>
+                           [-username <id>] [-ttl 336h]
+                                   Issue a time-limited demo ID and one-time-shown password.
+  forgeai demo-user list [-config path]
+                                   List demo accounts and expiry status.
+  forgeai demo-user revoke [-config path] <username>
+                                   Disable an account and revoke all sessions immediately.
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`)
+}
+
+func cmdDemoUser(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "forgeai demo-user: expected a subcommand (create, list, revoke)")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "create":
+		cmdDemoUserCreate(args[1:])
+	case "list":
+		cmdDemoUserList(args[1:])
+	case "revoke":
+		cmdDemoUserRevoke(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "forgeai demo-user: unknown subcommand %q\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func cmdDemoUserCreate(args []string) {
+	fs := flag.NewFlagSet("demo-user create", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	email := fs.String("email", "", "work email authorized in Cloudflare Access")
+	company := fs.String("company", "", "company or organization")
+	username := fs.String("username", "", "login ID (default: generated)")
+	ttl := fs.Duration("ttl", 14*24*time.Hour, "account lifetime")
+	fs.Parse(args)
+	if *email == "" || *company == "" || *ttl <= 0 {
+		fmt.Fprintln(os.Stderr, "forgeai demo-user create: -email, -company, and a positive -ttl are required")
+		os.Exit(1)
+	}
+	if *username == "" {
+		*username = "demo-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	}
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+	auth := usecase.NewDemoAccessUseCase(a.DemoAccess(), usecase.DefaultDemoSessionDuration)
+	user, password, err := auth.CreateUser(context.Background(), *username, *email, *company, time.Now().Add(*ttl))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("ForgeAI demo account created. The password is shown only now.")
+	fmt.Printf("  User ID:    %s\n", user.Username)
+	fmt.Printf("  Password:   %s\n", password)
+	fmt.Printf("  Work email: %s\n", user.Email)
+	fmt.Printf("  Company:    %s\n", user.Company)
+	fmt.Printf("  Expires:    %s\n", user.ExpiresAt.Format(time.RFC3339))
+	fmt.Println("  Next: allow the same work email in the Cloudflare Access policy.")
+}
+
+func cmdDemoUserList(args []string) {
+	fs := flag.NewFlagSet("demo-user list", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	fs.Parse(args)
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+	users, err := a.DemoAccess().ListUsers(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%-20s %-30s %-24s %-10s %s\n", "USER ID", "WORK EMAIL", "COMPANY", "STATUS", "EXPIRES")
+	now := time.Now()
+	for _, user := range users {
+		status := "active"
+		if user.DisabledAt != nil {
+			status = "revoked"
+		} else if !user.ExpiresAt.After(now) {
+			status = "expired"
+		}
+		fmt.Printf("%-20s %-30s %-24s %-10s %s\n", user.Username, user.Email, user.Company, status, user.ExpiresAt.Format(time.RFC3339))
+	}
+}
+
+func cmdDemoUserRevoke(args []string) {
+	fs := flag.NewFlagSet("demo-user revoke", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config YAML")
+	fs.Parse(args)
+	if len(fs.Args()) != 1 {
+		fmt.Fprintln(os.Stderr, "forgeai demo-user revoke: expected <username>")
+		os.Exit(1)
+	}
+	a, err := app.Bootstrap(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	defer a.Close()
+	if err := a.DemoAccess().DisableUser(context.Background(), fs.Args()[0], time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("forgeai: revoked demo user %q and all active sessions\n", fs.Args()[0])
+	fmt.Println("Next: remove the user's email from the Cloudflare Access policy.")
 }
 
 func cmdServe(args []string) {
