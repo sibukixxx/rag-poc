@@ -12,6 +12,7 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/domain/demoaccess"
 	"github.com/sibukixxx/rag-poc/internal/domain/eval"
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/domain/source"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
@@ -25,6 +26,13 @@ func (a *App) Knowledge() knowledge.Store {
 // by `forgeai demo-user` administration commands.
 func (a *App) DemoAccess() demoaccess.Store {
 	return sqlite.NewDemoAccessStore(a.DB)
+}
+
+// Sources returns the provider-neutral synchronization state store. Concrete
+// connectors are registered separately so credentials and provider SDKs never
+// leak into the domain or ingestion layers.
+func (a *App) Sources() source.Store {
+	return sqlite.NewSourceStore(a.DB)
 }
 
 // Datasets returns the eval.Store for CLI commands that only read runs
