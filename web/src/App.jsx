@@ -20,7 +20,7 @@ const TABS = [
     id: 'knowledge',
     label: '資料管理',
     english: 'Knowledge',
-    description: 'PDFや文書を登録して検索可能にする',
+    description: 'ファイルや外部サービスの情報を検索可能にする',
     purpose: '知識を入れる',
     Component: Knowledge,
   },
