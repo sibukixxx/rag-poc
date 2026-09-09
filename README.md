@@ -21,6 +21,7 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 12-week development roadmap
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — Design decisions, trade-offs, risk assessment
 - [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Free deployment guide (Cloudflare Tunnel + Workers)
+- [docs/source-connectors.md](docs/source-connectors.md) — Provider-neutral external source synchronization architecture
 - [docs/demo-access.md](docs/demo-access.md) — 問い合わせ後に期限付き個別デモを発行する運用
 
 ## Installation

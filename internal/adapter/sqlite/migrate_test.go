@@ -18,7 +18,7 @@ func TestOpenAppliesMigrationsAndIsIdempotent(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"projects", "settings", "secrets", "traces", "spans", "schema_migrations"} {
+	for _, table := range []string{"projects", "settings", "secrets", "traces", "spans", "source_connections", "source_items", "source_sync_jobs", "schema_migrations"} {
 		var name string
 		err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
 		if err != nil {

@@ -62,22 +62,41 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 		return nil, fmt.Errorf("creating document: %w", err)
 	}
 
-	fail := func(err error) (*knowledge.Document, error) {
-		_ = u.Store.UpdateDocumentStatus(ctx, doc.ID, knowledge.DocumentStatusFailed, err.Error())
-		doc.Status = knowledge.DocumentStatusFailed
-		doc.Error = err.Error()
-		return &doc, err
-	}
-
 	loader, ok := u.Loaders.Find(filename, mimeType)
 	if !ok {
-		return fail(fmt.Errorf("unsupported file type for %q", filename))
+		return u.failDocument(ctx, &doc, fmt.Errorf("unsupported file type for %q", filename))
 	}
 
 	pages, err := loadWithGuard(ctx, loader, data, knowledge.FileMeta{Filename: filename, MimeType: mimeType})
 	if err != nil {
-		return fail(fmt.Errorf("extracting text: %w", err))
+		return u.failDocument(ctx, &doc, fmt.Errorf("extracting text: %w", err))
 	}
+	return u.ingestPages(ctx, &doc, pages)
+}
+
+// IngestText is the provider-neutral entry point for external connectors.
+// Connectors normalize their provider payload into plain text, then reuse the
+// exact same normalization, chunking, deduplication, embedding, and tracing
+// pipeline as uploaded files.
+func (u *IngestUseCase) IngestText(ctx context.Context, knowledgeBaseID, title, mimeType, text string) (*knowledge.Document, error) {
+	if mimeType == "" {
+		mimeType = "text/plain"
+	}
+	doc := knowledge.Document{
+		ID:              uuid.NewString(),
+		KnowledgeBaseID: knowledgeBaseID,
+		Filename:        title,
+		MimeType:        mimeType,
+		SizeBytes:       int64(len([]byte(text))),
+		Status:          knowledge.DocumentStatusPending,
+	}
+	if err := u.Store.CreateDocument(ctx, doc); err != nil {
+		return nil, fmt.Errorf("creating document: %w", err)
+	}
+	return u.ingestPages(ctx, &doc, []knowledge.Page{{Heading: title, Text: text}})
+}
+
+func (u *IngestUseCase) ingestPages(ctx context.Context, doc *knowledge.Document, pages []knowledge.Page) (*knowledge.Document, error) {
 	for i := range pages {
 		// NFKC normalization keeps chunk hashes stable across equivalent
 		// Unicode forms (e.g. full/half-width kana) and improves later
@@ -87,7 +106,7 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 
 	chunkResults := u.Tokenizer.ChunkPages(pages, u.ChunkerConfig)
 	if len(chunkResults) == 0 {
-		return fail(fmt.Errorf("no extractable text found in %q", filename))
+		return u.failDocument(ctx, doc, fmt.Errorf("no extractable text found in %q", doc.Filename))
 	}
 
 	model := u.Embedder.Model()
@@ -106,11 +125,11 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 	}
 
 	if err := u.Store.ReplaceChunks(ctx, doc.ID, chunks); err != nil {
-		return fail(fmt.Errorf("storing chunks: %w", err))
+		return u.failDocument(ctx, doc, fmt.Errorf("storing chunks: %w", err))
 	}
 
 	if err := u.embedChunks(ctx, chunks, model); err != nil {
-		return fail(fmt.Errorf("embedding chunks: %w", err))
+		return u.failDocument(ctx, doc, fmt.Errorf("embedding chunks: %w", err))
 	}
 
 	if err := u.Store.UpdateDocumentStatus(ctx, doc.ID, knowledge.DocumentStatusReady, ""); err != nil {
@@ -118,7 +137,14 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 	}
 	doc.Status = knowledge.DocumentStatusReady
 	doc.ChunkCount = len(chunks)
-	return &doc, nil
+	return doc, nil
+}
+
+func (u *IngestUseCase) failDocument(ctx context.Context, doc *knowledge.Document, err error) (*knowledge.Document, error) {
+	_ = u.Store.UpdateDocumentStatus(ctx, doc.ID, knowledge.DocumentStatusFailed, err.Error())
+	doc.Status = knowledge.DocumentStatusFailed
+	doc.Error = err.Error()
+	return doc, err
 }
 
 // extractTimeout bounds how long a single loader may run. Parsers of

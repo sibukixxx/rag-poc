@@ -232,6 +232,24 @@ func TestIngestFileCreatesChunksAndEmbeddings(t *testing.T) {
 	}
 }
 
+func TestIngestTextUsesTheSameChunkAndEmbeddingPipeline(t *testing.T) {
+	store := newMemKnowledgeStore()
+	embedder := &countingEmbedder{}
+	uc := newIngestUseCase(t, store, embedder)
+	kb, _ := store.EnsureKnowledgeBase(context.Background(), "Demo", "demo")
+
+	doc, err := uc.IngestText(context.Background(), kb.ID, "Slack support thread", "text/plain", "返品は発送から7日以内です。")
+	if err != nil {
+		t.Fatalf("IngestText: %v", err)
+	}
+	if doc.Status != knowledge.DocumentStatusReady || doc.Filename != "Slack support thread" || doc.ChunkCount == 0 {
+		t.Fatalf("unexpected document: %+v", doc)
+	}
+	if embedder.calls != 1 {
+		t.Fatalf("expected one embedding call, got %d", embedder.calls)
+	}
+}
+
 // This is the acceptance criterion from docs/ROADMAP.md W3: re-ingesting
 // identical content must not call the embedder again.
 func TestReIngestingIdenticalContentSkipsEmbedding(t *testing.T) {
