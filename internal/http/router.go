@@ -1,6 +1,7 @@
 // Package http wires ForgeAI's HTTP surface: the management API
 // (/api/v1, session-authenticated, added incrementally per
-// docs/ROADMAP.md) and, from W10 onward, the runtime API (/runtime/v1).
+// docs/ROADMAP.md) and the W10 runtime API (/runtime/v1, Bearer-token
+// authenticated per immutable Deployment).
 package http
 
 import (
@@ -35,22 +36,23 @@ const (
 )
 
 // Deps carries the dependencies handlers need. It grows as usecases are
-// added (W2+); keeping it as a struct avoids reshuffling NewRouter's
-// signature every week.
+// added; keeping it as a struct avoids reshuffling NewRouter's signature.
 type Deps struct {
-	DB        *sql.DB
-	Version   string
-	Chat      *usecase.ChatUseCase
-	Knowledge knowledge.Store
-	Ingest    *usecase.IngestUseCase
-	Search    *usecase.SearchUseCase
-	RAGChat   *usecase.RAGChatUseCase
-	Prompts   prompt.Store
-	Traces    trace.Store
-	Datasets  eval.Store
-	Eval      *usecase.EvaluationUseCase
-	Compare   *usecase.CompareUseCase
-	DemoAuth  *handler.DemoAuthHandler
+	DB          *sql.DB
+	Version     string
+	Chat        *usecase.ChatUseCase
+	Knowledge   knowledge.Store
+	Ingest      *usecase.IngestUseCase
+	Search      *usecase.SearchUseCase
+	RAGChat     *usecase.RAGChatUseCase
+	Prompts     prompt.Store
+	Traces      trace.Store
+	Datasets    eval.Store
+	Eval        *usecase.EvaluationUseCase
+	Compare     *usecase.CompareUseCase
+	Deployments *usecase.DeploymentUseCase
+	Runtime     *usecase.RuntimeUseCase
+	DemoAuth    *handler.DemoAuthHandler
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -68,6 +70,7 @@ func NewRouter(deps Deps) http.Handler {
 	prompts := handler.NewPromptHandler(deps.Prompts)
 	traces := handler.NewTraceHandler(deps.Traces)
 	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval, deps.Compare)
+	deployments := handler.NewDeploymentHandler(deps.Deployments, deps.Runtime)
 	demoAuth := deps.DemoAuth
 
 	if demoAuth != nil {
@@ -114,7 +117,24 @@ func NewRouter(deps Deps) http.Handler {
 			// parsed as a run ID.
 			r.Get("/evaluations/compare", evaluations.CompareEvaluations)
 			r.Get("/evaluations/{id}", evaluations.GetEvaluation)
+
+			// W10 management surface. Token plaintext is returned only from
+			// IssueToken; list responses expose prefix/metadata only.
+			r.With(limitBody(maxJSONBody)).Post("/deployments", deployments.Create)
+			r.Get("/deployments", deployments.List)
+			r.With(limitBody(maxJSONBody)).Post("/deployments/{id}/tokens", deployments.IssueToken)
+			r.Get("/deployments/{id}/tokens", deployments.ListTokens)
+			r.Delete("/deployments/{id}/tokens/{tokenID}", deployments.RevokeToken)
 		})
+	})
+
+	// Runtime is deliberately outside the management/demo session boundary.
+	// Authentication is a per-deployment Bearer token; the handler also
+	// enforces a per-token request window while chi bounds total concurrency.
+	r.Route("/runtime/v1", func(r chi.Router) {
+		r.Use(chimiddleware.Throttle(maxInflight))
+		r.With(limitBody(maxJSONBody)).Post("/apps/{slug}/search", deployments.RuntimeSearch)
+		r.With(limitBody(maxJSONBody)).Post("/apps/{slug}/chat", deployments.RuntimeChat)
 	})
 
 	r.Group(func(r chi.Router) {
