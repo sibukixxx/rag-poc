@@ -64,25 +64,35 @@ func (a *App) Serve() error {
 	judge := usecase.NewLLMJudge(router, prices, traces, promptStore)
 	evalUC := usecase.NewEvaluationUseCase(search, ragChat, judge, datasets, traces)
 	compareUC := usecase.NewCompareUseCase(datasets)
+
+	// W10 freezes the evaluated KB/prompt/model/retrieval configuration into
+	// an immutable Deployment, then exposes that snapshot through a separate
+	// Bearer-authenticated runtime surface.
+	deploymentStore := sqlite.NewDeploymentStore(a.DB)
+	deploymentUC := usecase.NewDeploymentUseCase(deploymentStore, knowledgeStore, promptStore, router)
+	runtimeUC := usecase.NewRuntimeUseCase(deploymentStore, search, ragChat)
+
 	demoAuthEnabled := envBool("FORGEAI_DEMO_AUTH_ENABLED")
 	requireCloudflare := envBool("FORGEAI_REQUIRE_CLOUDFLARE_ACCESS")
 	demoAuthUC := usecase.NewDemoAccessUseCase(sqlite.NewDemoAccessStore(a.DB), usecase.DefaultDemoSessionDuration)
 	demoAuthHandler := forgehandler.NewDemoAuthHandler(demoAuthUC, demoAuthEnabled, requireCloudflare)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
-		DB:        a.DB,
-		Version:   Version,
-		Chat:      chat,
-		Knowledge: knowledgeStore,
-		Ingest:    ingest,
-		Search:    search,
-		RAGChat:   ragChat,
-		Prompts:   promptStore,
-		Traces:    traces,
-		Datasets:  datasets,
-		Eval:      evalUC,
-		Compare:   compareUC,
-		DemoAuth:  demoAuthHandler,
+		DB:          a.DB,
+		Version:     Version,
+		Chat:        chat,
+		Knowledge:   knowledgeStore,
+		Ingest:      ingest,
+		Search:      search,
+		RAGChat:     ragChat,
+		Prompts:     promptStore,
+		Traces:      traces,
+		Datasets:    datasets,
+		Eval:        evalUC,
+		Compare:     compareUC,
+		Deployments: deploymentUC,
+		Runtime:     runtimeUC,
+		DemoAuth:    demoAuthHandler,
 	})
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
