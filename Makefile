@@ -1,4 +1,4 @@
-.PHONY: build test vet run doctor init clean docker-build up down logs
+.PHONY: build test vet run doctor init clean release-check release-snapshot docker-build up down logs
 
 build:
 	CGO_ENABLED=0 go build -o dist/forgeai ./cmd/forgeai
@@ -20,6 +20,12 @@ init: build
 
 clean:
 	rm -rf dist data
+
+release-check:
+	goreleaser check
+
+release-snapshot:
+	goreleaser release --snapshot --clean
 
 # --- Docker / Cloudflare Tunnel (docs/deploy-cloudflare.md) ---
 IMAGE ?= forgeai:local
