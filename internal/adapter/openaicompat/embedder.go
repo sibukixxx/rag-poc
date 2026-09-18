@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
 )
 
@@ -23,12 +24,16 @@ type Embedder struct {
 }
 
 func NewEmbedder(baseURL, apiKey, model string, dims int) *Embedder {
+	return NewEmbedderWithEgress(baseURL, apiKey, model, dims, egress.Policy{Mode: egress.ModeExternalAllowed})
+}
+
+func NewEmbedderWithEgress(baseURL, apiKey, model string, dims int, policy egress.Policy) *Embedder {
 	return &Embedder{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		model:   model,
 		dims:    dims,
-		http:    &http.Client{Timeout: 120 * time.Second},
+		http:    &http.Client{Timeout: 120 * time.Second, Transport: egress.Transport{Policy: policy}},
 	}
 }
 

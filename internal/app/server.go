@@ -30,7 +30,7 @@ func (a *App) Serve() error {
 	// store.
 	secrets, _ := a.Secrets()
 
-	router := BuildRouter(a.Config.LLM, secrets)
+	router := BuildRouter(a.Config.LLM, secrets, a.Config.Privacy)
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	chat := usecase.NewChatUseCase(router, prices, traces)
@@ -40,7 +40,7 @@ func (a *App) Serve() error {
 		return fmt.Errorf("loading tokenizer: %w", err)
 	}
 	knowledgeStore := sqlite.NewKnowledgeStore(a.DB)
-	embedder := BuildEmbedder(a.Config.Embedding, secrets)
+	embedder := BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
 	ingest := usecase.NewIngestUseCase(knowledgeStore, extractor.NewDefaultRegistry(), tok, embedder, prices, traces)
 
 	// Hybrid Search: vecmem (embedded brute-force cosine) + FTS5 trigram,

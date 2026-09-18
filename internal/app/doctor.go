@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
+	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/config"
 	"github.com/sibukixxx/rag-poc/internal/domain/secret"
@@ -30,6 +31,7 @@ func Doctor(configPath string) []CheckStatus {
 		return checks
 	}
 	checks = append(checks, CheckStatus{Name: "Config", OK: true, Info: "loaded"})
+	checks = append(checks, privacyCheck(cfg))
 
 	if err := cfg.EnsureDirs(); err != nil {
 		checks = append(checks, CheckStatus{Name: "Filesystem", OK: false, Info: err.Error()})
@@ -73,6 +75,39 @@ func Doctor(configPath string) []CheckStatus {
 	checks = append(checks, embeddingCheck(cfg, secrets))
 
 	return checks
+}
+
+func privacyCheck(cfg config.Config) CheckStatus {
+	p := buildEgressPolicy([]config.PrivacyConfig{cfg.Privacy})
+	if err := p.Validate(); err != nil {
+		return CheckStatus{Name: "Privacy / egress", OK: false, Info: err.Error()}
+	}
+	var blocked []string
+	for _, provider := range cfg.LLM.Providers {
+		if err := p.Check(provider.BaseURL); err != nil {
+			blocked = append(blocked, provider.BaseURL)
+		}
+	}
+	if err := p.Check(cfg.Embedding.Provider.BaseURL); err != nil {
+		blocked = append(blocked, cfg.Embedding.Provider.BaseURL)
+	}
+	if len(blocked) > 0 {
+		return CheckStatus{Name: "Privacy / egress", OK: false, Info: fmt.Sprintf("mode=%s; blocked provider destinations: %v", cfg.Privacy.Mode, blocked)}
+	}
+	mode := cfg.Privacy.Mode
+	if mode == "" {
+		mode = egress.ModeExternalAllowed
+	}
+	return CheckStatus{Name: "Privacy / egress", OK: true, Info: fmt.Sprintf("mode=%s; LLM=%v; embedding=%s", mode, providerURLs(cfg), cfg.Embedding.Provider.BaseURL)}
+}
+
+func providerURLs(cfg config.Config) []string {
+	urls := make([]string, 0, len(cfg.LLM.Providers))
+	for _, provider := range cfg.LLM.Providers {
+		urls = append(urls, provider.BaseURL)
+	}
+	sort.Strings(urls)
+	return urls
 }
 
 func embeddingCheck(cfg config.Config, secrets secret.Store) CheckStatus {

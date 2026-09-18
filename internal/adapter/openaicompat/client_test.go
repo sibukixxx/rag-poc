@@ -2,14 +2,27 @@ package openaicompat_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
 	"github.com/sibukixxx/rag-poc/internal/adapter/openaicompat"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
 )
+
+func TestGenerateLocalOnlyBlocksExternalProvider(t *testing.T) {
+	client := openaicompat.NewWithEgress("https://api.openai.com/v1", "secret", egress.Policy{Mode: egress.ModeLocalOnly})
+	_, err := client.Generate(context.Background(), llm.GenerateRequest{
+		Model:    "test-model",
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "must not leave process"}},
+	})
+	if !errors.Is(err, egress.ErrBlocked) {
+		t.Fatalf("Generate error = %v, want ErrBlocked", err)
+	}
+}
 
 func TestGenerateParsesContentAndUsage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
