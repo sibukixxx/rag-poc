@@ -16,6 +16,7 @@ type Config struct {
 	Database  DatabaseConfig  `yaml:"database"`
 	Storage   StorageConfig   `yaml:"storage"`
 	Security  SecurityConfig  `yaml:"security"`
+	Privacy   PrivacyConfig   `yaml:"privacy"`
 	LLM       LLMConfig       `yaml:"llm"`
 	Embedding EmbeddingConfig `yaml:"embedding"`
 }
@@ -38,6 +39,15 @@ type SecurityConfig struct {
 	// EncryptionKeyEnv names the environment variable holding the base64
 	// master key used to encrypt secrets at rest (see internal/adapter/crypto).
 	EncryptionKeyEnv string `yaml:"encryption_key_env"`
+}
+
+// PrivacyConfig controls outbound provider traffic. external_allowed preserves
+// the normal OpenAI-compatible behaviour. local_only fails closed unless the
+// destination is loopback/private or its URL origin is explicitly allowlisted.
+type PrivacyConfig struct {
+	Mode                string   `yaml:"mode"`
+	AllowedDestinations []string `yaml:"allowed_destinations"`
+	AllowPrivateNetwork bool     `yaml:"allow_private_network"`
 }
 
 // LLMConfig configures the LLM Router: named providers, business-facing
@@ -104,6 +114,10 @@ func Default() Config {
 		},
 		Security: SecurityConfig{
 			EncryptionKeyEnv: "FORGEAI_MASTER_KEY",
+		},
+		Privacy: PrivacyConfig{
+			Mode:                "external_allowed",
+			AllowPrivateNetwork: true,
 		},
 		LLM: LLMConfig{
 			Providers: map[string]ProviderConfig{
@@ -172,6 +186,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("FORGEAI_STORAGE_PATH"); ok {
 		cfg.Storage.Path = v
+	}
+	if v, ok := os.LookupEnv("FORGEAI_PRIVACY_MODE"); ok {
+		cfg.Privacy.Mode = v
 	}
 }
 

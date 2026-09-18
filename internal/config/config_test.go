@@ -44,6 +44,7 @@ func TestLoadMergesYAMLFile(t *testing.T) {
 
 func TestEnvOverridesTakePrecedence(t *testing.T) {
 	t.Setenv("FORGEAI_PORT", "7000")
+	t.Setenv("FORGEAI_PRIVACY_MODE", "local_only")
 
 	cfg, err := config.Load("")
 	if err != nil {
@@ -51,6 +52,9 @@ func TestEnvOverridesTakePrecedence(t *testing.T) {
 	}
 	if cfg.Server.Port != 7000 {
 		t.Errorf("expected env override port 7000, got %d", cfg.Server.Port)
+	}
+	if cfg.Privacy.Mode != "local_only" {
+		t.Errorf("expected privacy mode env override, got %q", cfg.Privacy.Mode)
 	}
 }
 

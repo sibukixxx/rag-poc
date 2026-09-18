@@ -2,13 +2,23 @@ package openaicompat_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
 	"github.com/sibukixxx/rag-poc/internal/adapter/openaicompat"
 )
+
+func TestEmbedLocalOnlyBlocksExternalProvider(t *testing.T) {
+	embedder := openaicompat.NewEmbedderWithEgress("https://api.openai.com/v1", "secret", "test-model", 2, egress.Policy{Mode: egress.ModeLocalOnly})
+	_, err := embedder.Embed(context.Background(), []string{"must not leave process"})
+	if !errors.Is(err, egress.ErrBlocked) {
+		t.Fatalf("Embed error = %v, want ErrBlocked", err)
+	}
+}
 
 func TestEmbedReturnsVectorsInInputOrder(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

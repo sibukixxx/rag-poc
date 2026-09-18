@@ -11,12 +11,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
 )
 
@@ -29,10 +30,14 @@ type Client struct {
 // New builds a client. baseURL should not have a trailing slash
 // (e.g. "https://api.openai.com/v1").
 func New(baseURL, apiKey string) *Client {
+	return NewWithEgress(baseURL, apiKey, egress.Policy{Mode: egress.ModeExternalAllowed})
+}
+
+func NewWithEgress(baseURL, apiKey string, policy egress.Policy) *Client {
 	return &Client{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 120 * time.Second},
+		http:    &http.Client{Timeout: 120 * time.Second, Transport: egress.Transport{Policy: policy}},
 	}
 }
 
@@ -96,13 +101,22 @@ func (c *Client) newRequest(ctx context.Context, body chatRequest) (*http.Reques
 	return req, nil
 }
 
-// readAPIError logs the upstream URL and response body (which can contain
-// internal hostnames, org/project IDs, or a masked API key) server-side
-// only, and returns an error safe to show to API clients.
+// readAPIError deliberately does not log the response body: providers may
+// echo credentials, prompts, or customer context in error payloads.
 func readAPIError(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	log.Printf("openaicompat: %s returned %d: %s", resp.Request.URL, resp.StatusCode, string(body))
+	log.Printf("openaicompat: %s returned %d", safeURL(resp.Request.URL), resp.StatusCode)
 	return fmt.Errorf("openaicompat: provider returned HTTP %d", resp.StatusCode)
+}
+
+func safeURL(source *url.URL) string {
+	if source == nil {
+		return "<unknown>"
+	}
+	u := *source
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 func (c *Client) Generate(ctx context.Context, req llm.GenerateRequest) (*llm.GenerateResponse, error) {

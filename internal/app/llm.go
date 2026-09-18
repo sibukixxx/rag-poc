@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
 	"github.com/sibukixxx/rag-poc/internal/adapter/openaicompat"
 	"github.com/sibukixxx/rag-poc/internal/config"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
@@ -14,14 +15,15 @@ import (
 // fails on a missing API key — a provider with no resolvable key is still
 // registered, so `forgeai serve` always starts; the missing key surfaces
 // as an API error on first use, and as a FAIL row in `forgeai doctor`.
-func BuildRouter(cfg config.LLMConfig, secrets secret.Store) *llm.Router {
+func BuildRouter(cfg config.LLMConfig, secrets secret.Store, privacy ...config.PrivacyConfig) *llm.Router {
 	router := llm.NewRouter()
+	policy := buildEgressPolicy(privacy)
 
 	for name, p := range cfg.Providers {
 		switch p.Type {
 		case "openai_compatible", "":
 			apiKey := resolveAPIKey(p, secrets)
-			router.RegisterProvider(name, openaicompat.New(p.BaseURL, apiKey))
+			router.RegisterProvider(name, openaicompat.NewWithEgress(p.BaseURL, apiKey, policy))
 		}
 	}
 
@@ -59,9 +61,17 @@ func HasAPIKey(p config.ProviderConfig, secrets secret.Store) bool {
 // BuildRouter, a missing API key doesn't prevent construction — it
 // surfaces as an API error on first use and as a FAIL row in `forgeai
 // doctor`.
-func BuildEmbedder(cfg config.EmbeddingConfig, secrets secret.Store) llm.Embedder {
+func BuildEmbedder(cfg config.EmbeddingConfig, secrets secret.Store, privacy ...config.PrivacyConfig) llm.Embedder {
 	apiKey := resolveAPIKey(cfg.Provider, secrets)
-	return openaicompat.NewEmbedder(cfg.Provider.BaseURL, apiKey, cfg.Model, cfg.Dimensions)
+	return openaicompat.NewEmbedderWithEgress(cfg.Provider.BaseURL, apiKey, cfg.Model, cfg.Dimensions, buildEgressPolicy(privacy))
+}
+
+func buildEgressPolicy(privacy []config.PrivacyConfig) egress.Policy {
+	if len(privacy) == 0 {
+		return egress.Policy{Mode: egress.ModeExternalAllowed}
+	}
+	p := privacy[0]
+	return egress.Policy{Mode: p.Mode, AllowedDestinations: p.AllowedDestinations, AllowPrivateNetwork: p.AllowPrivateNetwork}
 }
 
 func BuildPriceTable(cfg config.LLMConfig) llm.PriceTable {
