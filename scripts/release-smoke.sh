@@ -15,7 +15,10 @@ test -s dist/checksums.txt || {
   exit 1
 }
 
-mapfile -t archives < <(find dist -maxdepth 1 -type f \( -name 'forgeai_*_linux_amd64.tar.gz' -o -name 'forgeai_*_linux_arm64.tar.gz' -o -name 'forgeai_*_darwin_arm64.tar.gz' -o -name 'forgeai_*_windows_amd64.zip' \) | sort)
+archives=()
+while IFS= read -r archive; do
+  [[ -n "$archive" ]] && archives+=("$archive")
+done < <(find dist -maxdepth 1 -type f \( -name 'forgeai_*_linux_amd64.tar.gz' -o -name 'forgeai_*_linux_arm64.tar.gz' -o -name 'forgeai_*_darwin_arm64.tar.gz' -o -name 'forgeai_*_windows_amd64.zip' \) | sort)
 
 if [[ "${#archives[@]}" -ne 4 ]]; then
   echo "expected exactly four supported archives, found ${#archives[@]}" >&2
