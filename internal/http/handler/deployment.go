@@ -129,6 +129,10 @@ func (h *DeploymentHandler) IssueToken(w http.ResponseWriter, r *http.Request) {
 	}
 	dto := tokenToDTO(issued.Token)
 	dto.Token = issued.Secret // returned once; never persisted by the store
+	// The plaintext runtime token exists only in this response. Prevent
+	// browsers/proxies from caching it as ordinary API content.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(dto)
