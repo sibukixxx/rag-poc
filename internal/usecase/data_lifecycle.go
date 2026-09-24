@@ -2,9 +2,12 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/lifecycle"
 )
 
@@ -29,6 +32,7 @@ type DataLifecycleUseCase struct {
 	store  lifecycle.Store
 	policy RetentionPolicy
 	now    func() time.Time
+	Audit  audit.Recorder
 }
 
 func NewDataLifecycleUseCase(store lifecycle.Store, policy RetentionPolicy) *DataLifecycleUseCase {
@@ -36,11 +40,30 @@ func NewDataLifecycleUseCase(store lifecycle.Store, policy RetentionPolicy) *Dat
 }
 
 func (u *DataLifecycleUseCase) DeleteDocument(ctx context.Context, documentID string) (lifecycle.DeletionReport, error) {
-	return u.store.DeleteDocument(ctx, documentID)
+	report, err := u.store.DeleteDocument(ctx, documentID)
+	u.auditDeletion(ctx, audit.ActionDocumentDelete, "document:"+documentID, report, err)
+	return report, err
 }
 
 func (u *DataLifecycleUseCase) DeleteKnowledgeBase(ctx context.Context, knowledgeBaseID string, includeDeployments bool) (lifecycle.DeletionReport, error) {
-	return u.store.DeleteKnowledgeBase(ctx, knowledgeBaseID, includeDeployments)
+	report, err := u.store.DeleteKnowledgeBase(ctx, knowledgeBaseID, includeDeployments)
+	u.auditDeletion(ctx, audit.ActionKnowledgeBaseDelete, "knowledge_base:"+knowledgeBaseID, report, err)
+	return report, err
+}
+
+func (u *DataLifecycleUseCase) auditDeletion(ctx context.Context, action, target string, r lifecycle.DeletionReport, err error) {
+	switch {
+	case errors.Is(err, lifecycle.ErrKnowledgeBaseHasDeployments):
+		recordAudit(ctx, u.Audit, action, audit.OutcomeDenied, target, map[string]string{"reason": "has_deployments"})
+	case err != nil:
+		recordAudit(ctx, u.Audit, action, audit.OutcomeFailure, target, nil)
+	default:
+		recordAudit(ctx, u.Audit, action, audit.OutcomeSuccess, target, map[string]string{
+			"documents": strconv.Itoa(r.Documents), "chunks": strconv.Itoa(r.Chunks),
+			"datasets": strconv.Itoa(r.Datasets), "deployments": strconv.Itoa(r.Deployments),
+			"source_connections": strconv.Itoa(r.SourceConnections),
+		})
+	}
 }
 
 // ApplyRetention deletes traces and evaluation runs older than the policy.

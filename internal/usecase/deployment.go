@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/deployment"
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
@@ -28,7 +30,7 @@ const (
 )
 
 var (
-	deploymentSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	deploymentSlugPattern  = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 	ErrUnauthorizedRuntime = errors.New("unauthorized runtime token")
 )
 
@@ -50,6 +52,7 @@ type DeploymentUseCase struct {
 	Knowledge knowledge.Store
 	Prompts   prompt.Store
 	Router    *llm.Router
+	Audit     audit.Recorder
 	Now       func() time.Time
 	NewID     func() string
 }
@@ -108,6 +111,10 @@ func (u *DeploymentUseCase) Create(ctx context.Context, in CreateDeploymentInput
 	if err := u.Store.CreateDeployment(ctx, d); err != nil {
 		return nil, err
 	}
+	recordAudit(ctx, u.Audit, audit.ActionDeploymentCreate, audit.OutcomeSuccess, "deployment:"+d.ID, map[string]string{
+		"slug": d.Slug, "knowledge_base_id": d.KnowledgeBaseID, "alias": d.Alias,
+		"prompt_version": strconv.Itoa(d.PromptVersion), "top_k": strconv.Itoa(d.TopK), "rerank": strconv.FormatBool(d.Rerank),
+	})
 	return &d, nil
 }
 
@@ -143,6 +150,9 @@ func (u *DeploymentUseCase) IssueToken(ctx context.Context, deploymentID, name s
 	if err := u.Store.CreateToken(ctx, t); err != nil {
 		return nil, err
 	}
+	recordAudit(ctx, u.Audit, audit.ActionRuntimeTokenIssue, audit.OutcomeSuccess, "deployment:"+deploymentID, map[string]string{
+		"token_id": t.ID, "token_name": t.Name, "token_fingerprint": audit.Fingerprint(secret),
+	})
 	return &IssuedRuntimeToken{Token: t, Secret: secret}, nil
 }
 
@@ -168,7 +178,11 @@ func (u *DeploymentUseCase) RevokeToken(ctx context.Context, deploymentID, token
 	if !found {
 		return deployment.ErrNotFound
 	}
-	return u.Store.RevokeToken(ctx, tokenID, u.Now())
+	if err := u.Store.RevokeToken(ctx, tokenID, u.Now()); err != nil {
+		return err
+	}
+	recordAudit(ctx, u.Audit, audit.ActionRuntimeTokenRevoke, audit.OutcomeSuccess, "deployment:"+deploymentID, map[string]string{"token_id": tokenID})
+	return nil
 }
 
 func newRuntimeToken() (string, error) {
@@ -188,25 +202,50 @@ type RuntimeUseCase struct {
 	Store   deployment.Store
 	Search  *SearchUseCase
 	RAGChat *RAGChatUseCase
+	Audit   audit.Recorder
 }
 
 func NewRuntimeUseCase(store deployment.Store, search *SearchUseCase, ragChat *RAGChatUseCase) *RuntimeUseCase {
 	return &RuntimeUseCase{Store: store, Search: search, RAGChat: ragChat}
 }
 
+// Authenticate resolves a Bearer token for a deployment slug. Rejections
+// are audited with a token fingerprint (never the token); successful
+// requests are not, since Runtime traffic would flood the trail.
 func (u *RuntimeUseCase) Authenticate(ctx context.Context, slug, rawToken string) (*deployment.Deployment, *deployment.Token, error) {
-	if strings.TrimSpace(rawToken) == "" {
+	reject := func(reason string) (*deployment.Deployment, *deployment.Token, error) {
+		meta := map[string]string{"reason": reason}
+		if rawToken != "" {
+			meta["token_fingerprint"] = audit.Fingerprint(rawToken)
+		}
+		recordAudit(ctx, u.Audit, audit.ActionRuntimeAuthRejected, audit.OutcomeDenied, "deployment_slug:"+truncateForAudit(slug), meta)
 		return nil, nil, ErrUnauthorizedRuntime
+	}
+	if strings.TrimSpace(rawToken) == "" {
+		return reject("missing_token")
 	}
 	d, err := u.Store.GetDeploymentBySlug(ctx, slug)
 	if err != nil {
-		return nil, nil, ErrUnauthorizedRuntime
+		return reject("unknown_deployment")
 	}
 	t, err := u.Store.GetTokenByHash(ctx, hashRuntimeToken(rawToken))
-	if err != nil || !t.Active() || t.DeploymentID != d.ID {
-		return nil, nil, ErrUnauthorizedRuntime
+	switch {
+	case err != nil:
+		return reject("unknown_token")
+	case !t.Active():
+		return reject("revoked_token")
+	case t.DeploymentID != d.ID:
+		return reject("wrong_deployment")
 	}
 	return d, t, nil
+}
+
+// truncateForAudit bounds caller-supplied strings stored in audit rows.
+func truncateForAudit(s string) string {
+	if len(s) > 128 {
+		return s[:128]
+	}
+	return s
 }
 
 func (u *RuntimeUseCase) SearchDeployment(ctx context.Context, d *deployment.Deployment, query string) ([]retrieval.Result, error) {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/demoaccess"
 )
 
@@ -28,6 +29,7 @@ type DemoAccessUseCase struct {
 	store           demoaccess.Store
 	sessionDuration time.Duration
 	now             func() time.Time
+	Audit           audit.Recorder
 }
 
 func NewDemoAccessUseCase(store demoaccess.Store, sessionDuration time.Duration) *DemoAccessUseCase {
@@ -72,7 +74,26 @@ func (u *DemoAccessUseCase) CreateUser(ctx context.Context, username, email, com
 	return user, password, nil
 }
 
+// Authenticate verifies demo credentials and opens a session. Every
+// attempt is audited with the claimed username and a generic reason; the
+// password is never recorded.
 func (u *DemoAccessUseCase) Authenticate(ctx context.Context, username, password, accessEmail string) (demoaccess.User, string, time.Time, error) {
+	user, token, expiresAt, err := u.authenticate(ctx, username, password, accessEmail)
+	target := "demo_user:" + truncateForAudit(strings.TrimSpace(username))
+	switch {
+	case err == nil:
+		recordAudit(ctx, u.Audit, audit.ActionAuthLogin, audit.OutcomeSuccess, target, nil)
+	case errors.Is(err, demoaccess.ErrAccountUnavailable):
+		recordAudit(ctx, u.Audit, audit.ActionAuthLogin, audit.OutcomeFailure, target, map[string]string{"reason": "account_unavailable"})
+	case errors.Is(err, demoaccess.ErrInvalidCredentials):
+		recordAudit(ctx, u.Audit, audit.ActionAuthLogin, audit.OutcomeFailure, target, map[string]string{"reason": "invalid_credentials"})
+	default:
+		recordAudit(ctx, u.Audit, audit.ActionAuthLogin, audit.OutcomeFailure, target, map[string]string{"reason": "error"})
+	}
+	return user, token, expiresAt, err
+}
+
+func (u *DemoAccessUseCase) authenticate(ctx context.Context, username, password, accessEmail string) (demoaccess.User, string, time.Time, error) {
 	user, err := u.store.GetUserByUsername(ctx, strings.TrimSpace(username))
 	if err != nil {
 		return demoaccess.User{}, "", time.Time{}, demoaccess.ErrInvalidCredentials
