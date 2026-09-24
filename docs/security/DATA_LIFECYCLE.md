@@ -14,13 +14,14 @@ All application data lives in one SQLite database (`database.path`, default `./d
 | Full-text index | `chunks_fts` (+ FTS5 shadow tables) | **Yes, plaintext and trigrams** | Document or KB deletion (explicit delete) and `data compact` (segment merge) |
 | Embeddings | `embeddings` | Derived vectors | Document or KB deletion (cascade) |
 | Source-sync records | `source_connections`, `source_items`, `source_sync_jobs` | Titles, source URLs, metadata; no document body | KB deletion; document deletion removes the document's `source_items` |
+| Bulk ingestion jobs | `ingestion_jobs`, `ingestion_job_items` | Relative file paths, sizes, per-file errors; no file content | KB deletion (cascade through the source connection) |
 | Golden Dataset | `datasets`, `dataset_cases` | Queries and expected answers written by the operator | KB deletion (cascade) |
 | Evaluation results | `evaluation_runs`, `evaluation_results` | **Yes**: generated answers, judge reasons, retrieved filenames | KB deletion, or retention (`retention.evaluation_runs_days`) |
 | Traces | `traces`, `spans` | Operation names, models, token/cost, error text. Prompts, questions, and chunk text are **not** stored (the `input`/`output` columns are unused) | Retention (`retention.traces_days`) |
 | Deployments | `deployments`, `runtime_api_tokens` | Frozen prompt text (operator-authored) and token hashes | KB deletion with `include_deployments` |
 | Secrets | `secrets` | Provider API keys, AES-GCM encrypted | `forgeai secret delete` |
 
-Uploaded files are **not** kept. Upload and `forgeai ingest` extract text in memory; `storage.path` is created but no original document is written to it in v0.1.
+Uploaded files are **not** kept. Upload, `forgeai ingest`, and filesystem sources extract text in memory; `storage.path` is created but no original document is written to it in v0.1. Filesystem sources read files in place from `sources.filesystem.allowed_roots`; deleting data in ForgeAI never deletes the original files.
 
 ## Deletion paths
 
