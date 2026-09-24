@@ -2,9 +2,12 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/lifecycle"
 )
 
@@ -15,12 +18,19 @@ import (
 type RetentionPolicy struct {
 	TraceDays         int
 	EvaluationRunDays int
+	AuditDays         int
 }
 
 // RetentionReport counts what one retention pass removed.
 type RetentionReport struct {
 	Traces         int `json:"traces"`
 	EvaluationRuns int `json:"evaluation_runs"`
+	AuditEvents    int `json:"audit_events"`
+}
+
+// auditPurger deletes expired audit events (implemented by audit.Store).
+type auditPurger interface {
+	DeleteEventsBefore(ctx context.Context, cutoff time.Time) (int, error)
 }
 
 // DataLifecycleUseCase is the operator path for customer-data deletion and
@@ -29,6 +39,9 @@ type DataLifecycleUseCase struct {
 	store  lifecycle.Store
 	policy RetentionPolicy
 	now    func() time.Time
+	Audit  audit.Recorder
+	// AuditRetention applies RetentionPolicy.AuditDays; nil disables it.
+	AuditRetention auditPurger
 }
 
 func NewDataLifecycleUseCase(store lifecycle.Store, policy RetentionPolicy) *DataLifecycleUseCase {
@@ -36,11 +49,30 @@ func NewDataLifecycleUseCase(store lifecycle.Store, policy RetentionPolicy) *Dat
 }
 
 func (u *DataLifecycleUseCase) DeleteDocument(ctx context.Context, documentID string) (lifecycle.DeletionReport, error) {
-	return u.store.DeleteDocument(ctx, documentID)
+	report, err := u.store.DeleteDocument(ctx, documentID)
+	u.auditDeletion(ctx, audit.ActionDocumentDelete, "document:"+documentID, report, err)
+	return report, err
 }
 
 func (u *DataLifecycleUseCase) DeleteKnowledgeBase(ctx context.Context, knowledgeBaseID string, includeDeployments bool) (lifecycle.DeletionReport, error) {
-	return u.store.DeleteKnowledgeBase(ctx, knowledgeBaseID, includeDeployments)
+	report, err := u.store.DeleteKnowledgeBase(ctx, knowledgeBaseID, includeDeployments)
+	u.auditDeletion(ctx, audit.ActionKnowledgeBaseDelete, "knowledge_base:"+knowledgeBaseID, report, err)
+	return report, err
+}
+
+func (u *DataLifecycleUseCase) auditDeletion(ctx context.Context, action, target string, r lifecycle.DeletionReport, err error) {
+	switch {
+	case errors.Is(err, lifecycle.ErrKnowledgeBaseHasDeployments):
+		recordAudit(ctx, u.Audit, action, audit.OutcomeDenied, target, map[string]string{"reason": "has_deployments"})
+	case err != nil:
+		recordAudit(ctx, u.Audit, action, audit.OutcomeFailure, target, nil)
+	default:
+		recordAudit(ctx, u.Audit, action, audit.OutcomeSuccess, target, map[string]string{
+			"documents": strconv.Itoa(r.Documents), "chunks": strconv.Itoa(r.Chunks),
+			"datasets": strconv.Itoa(r.Datasets), "deployments": strconv.Itoa(r.Deployments),
+			"source_connections": strconv.Itoa(r.SourceConnections),
+		})
+	}
 }
 
 // ApplyRetention deletes traces and evaluation runs older than the policy.
@@ -60,6 +92,13 @@ func (u *DataLifecycleUseCase) ApplyRetention(ctx context.Context) (RetentionRep
 			return report, fmt.Errorf("applying evaluation-run retention: %w", err)
 		}
 		report.EvaluationRuns = n
+	}
+	if u.policy.AuditDays > 0 && u.AuditRetention != nil {
+		n, err := u.AuditRetention.DeleteEventsBefore(ctx, now.AddDate(0, 0, -u.policy.AuditDays))
+		if err != nil {
+			return report, fmt.Errorf("applying audit retention: %w", err)
+		}
+		report.AuditEvents = n
 	}
 	return report, nil
 }

@@ -75,12 +75,15 @@ func Doctor(configPath string) []CheckStatus {
 
 	checks = append(checks, llmProviderChecks(cfg, secrets)...)
 	checks = append(checks, embeddingCheck(cfg, secrets))
+	if cfg.Profile == config.ProfileProduction {
+		checks = append(checks, productionProfileChecks(cfg, envBool("FORGEAI_DEMO_AUTH_ENABLED"))...)
+	}
 
 	return checks
 }
 
 func privacyCheck(cfg config.Config) CheckStatus {
-	p := buildEgressPolicy([]config.PrivacyConfig{cfg.Privacy})
+	p := buildEgressPolicy(cfg.Privacy)
 	if err := p.Validate(); err != nil {
 		return CheckStatus{Name: "Privacy / egress", OK: false, Info: err.Error()}
 	}
@@ -195,6 +198,26 @@ func retentionCheck(cfg config.Config) CheckStatus {
 	}
 	return CheckStatus{
 		Name: "Retention", OK: true,
-		Info: fmt.Sprintf("traces=%s evaluation_runs=%s (apply with `forgeai data retention`)", days(cfg.Retention.TraceDays), days(cfg.Retention.EvaluationRunDays)),
+		Info: fmt.Sprintf("traces=%s evaluation_runs=%s audit=%s (apply with `forgeai data retention`)", days(cfg.Retention.TraceDays), days(cfg.Retention.EvaluationRunDays), days(cfg.Retention.AuditDays)),
 	}
+}
+
+// productionProfileChecks fail on settings that are fine for demos but not
+// for customer data. ForgeAI v0.1 is single-tenant: one instance per
+// customer security boundary (#24). Declarations are operator statements;
+// ForgeAI cannot verify a reverse proxy or an encrypted disk.
+func productionProfileChecks(cfg config.Config, demoAuthEnabled bool) []CheckStatus {
+	tenancy := CheckStatus{Name: "Production tenancy", OK: true, Info: "single-tenant: one ForgeAI instance serves one customer security boundary"}
+	if demoAuthEnabled {
+		tenancy = CheckStatus{Name: "Production tenancy", OK: false, Info: "demo authentication is enabled: demo accounts share one ForgeAI workspace and are not tenant isolation; run one ForgeAI instance per customer and disable FORGEAI_DEMO_AUTH_ENABLED"}
+	}
+	boundary := CheckStatus{Name: "Production management boundary", OK: true, Info: "operator declares an authenticating reverse proxy (not verified by ForgeAI)"}
+	if cfg.Security.ManagementBoundary != config.ManagementBoundaryReverseProxyIdentity {
+		boundary = CheckStatus{Name: "Production management boundary", OK: false, Info: "not declared: put /api/v1 and the UI behind an authenticating reverse proxy and set security.management_boundary: reverse_proxy_identity"}
+	}
+	storage := CheckStatus{Name: "Production storage at rest", OK: true, Info: "operator declares an encrypted volume (not verified by ForgeAI)"}
+	if cfg.Security.StorageAtRest != config.StorageAtRestOperatorEncryptedVolume {
+		storage = CheckStatus{Name: "Production storage at rest", OK: false, Info: "not declared: set security.storage_at_rest: operator_encrypted_volume once the database is on an encrypted volume"}
+	}
+	return []CheckStatus{tenancy, boundary, storage}
 }

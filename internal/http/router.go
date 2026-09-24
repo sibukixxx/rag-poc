@@ -6,12 +6,14 @@ package http
 
 import (
 	"database/sql"
+	"net"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/eval"
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
 	"github.com/sibukixxx/rag-poc/internal/domain/prompt"
@@ -53,6 +55,7 @@ type Deps struct {
 	Deployments *usecase.DeploymentUseCase
 	Runtime     *usecase.RuntimeUseCase
 	Lifecycle   *usecase.DataLifecycleUseCase
+	Audit       audit.Store
 	DemoAuth    *handler.DemoAuthHandler
 }
 
@@ -64,6 +67,7 @@ func NewRouter(deps Deps) http.Handler {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Logger)
 	r.Use(securityHeaders)
+	r.Use(auditActor(deps.DemoAuth))
 
 	health := handler.NewHealthHandler(deps.DB, deps.Version)
 	chat := handler.NewChatHandler(deps.Chat)
@@ -73,6 +77,7 @@ func NewRouter(deps Deps) http.Handler {
 	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval, deps.Compare)
 	deployments := handler.NewDeploymentHandler(deps.Deployments, deps.Runtime)
 	lifecycleHandler := handler.NewLifecycleHandler(deps.Lifecycle)
+	auditHandler := handler.NewAuditHandler(deps.Audit)
 	demoAuth := deps.DemoAuth
 
 	if demoAuth != nil {
@@ -104,6 +109,7 @@ func NewRouter(deps Deps) http.Handler {
 			// serves a Deployment requires include_deployments=true.
 			r.Delete("/knowledge-bases/{id}", lifecycleHandler.DeleteKnowledgeBase)
 			r.Delete("/knowledge-bases/{id}/documents/{docID}", lifecycleHandler.DeleteDocument)
+			r.Get("/audit-events", auditHandler.List)
 			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/search", kb.Search)
 			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/chat", kb.Chat)
 			r.With(limitBody(maxJSONBody)).Post("/prompts", prompts.Create)
@@ -224,4 +230,28 @@ func noDirListing(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// auditActor attaches the acting principal to the request context for the
+// audit trail: the signed-in demo user when demo auth is on, otherwise the
+// client address. Runtime handlers replace it with the runtime token ID.
+func auditActor(demoAuth *handler.DemoAuthHandler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			actor := "http:" + clientHost(r.RemoteAddr)
+			if demoAuth != nil {
+				if u, err := demoAuth.UserFromRequest(r); err == nil && u.Username != "" {
+					actor = "demo_user:" + u.Username
+				}
+			}
+			next.ServeHTTP(w, r.WithContext(audit.WithActor(r.Context(), actor)))
+		})
+	}
+}
+
+func clientHost(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }

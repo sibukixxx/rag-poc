@@ -5,8 +5,10 @@ import (
 	"os"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
+	"github.com/sibukixxx/rag-poc/internal/adapter/llmaudit"
 	"github.com/sibukixxx/rag-poc/internal/adapter/openaicompat"
 	"github.com/sibukixxx/rag-poc/internal/config"
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/llm"
 	"github.com/sibukixxx/rag-poc/internal/domain/secret"
 )
@@ -15,7 +17,7 @@ import (
 // fails on a missing API key — a provider with no resolvable key is still
 // registered, so `forgeai serve` always starts; the missing key surfaces
 // as an API error on first use, and as a FAIL row in `forgeai doctor`.
-func BuildRouter(cfg config.LLMConfig, secrets secret.Store, privacy ...config.PrivacyConfig) *llm.Router {
+func BuildRouter(cfg config.LLMConfig, secrets secret.Store, privacy config.PrivacyConfig, rec audit.Recorder) *llm.Router {
 	router := llm.NewRouter()
 	policy := buildEgressPolicy(privacy)
 
@@ -23,7 +25,8 @@ func BuildRouter(cfg config.LLMConfig, secrets secret.Store, privacy ...config.P
 		switch p.Type {
 		case "openai_compatible", "":
 			apiKey := resolveAPIKey(p, secrets)
-			router.RegisterProvider(name, openaicompat.NewWithEgress(p.BaseURL, apiKey, policy))
+			client := openaicompat.NewWithEgress(p.BaseURL, apiKey, policy)
+			router.RegisterProvider(name, llmaudit.WrapLLM(client, name, p.BaseURL, rec))
 		}
 	}
 
@@ -61,16 +64,13 @@ func HasAPIKey(p config.ProviderConfig, secrets secret.Store) bool {
 // BuildRouter, a missing API key doesn't prevent construction — it
 // surfaces as an API error on first use and as a FAIL row in `forgeai
 // doctor`.
-func BuildEmbedder(cfg config.EmbeddingConfig, secrets secret.Store, privacy ...config.PrivacyConfig) llm.Embedder {
+func BuildEmbedder(cfg config.EmbeddingConfig, secrets secret.Store, privacy config.PrivacyConfig, rec audit.Recorder) llm.Embedder {
 	apiKey := resolveAPIKey(cfg.Provider, secrets)
-	return openaicompat.NewEmbedderWithEgress(cfg.Provider.BaseURL, apiKey, cfg.Model, cfg.Dimensions, buildEgressPolicy(privacy))
+	embedder := openaicompat.NewEmbedderWithEgress(cfg.Provider.BaseURL, apiKey, cfg.Model, cfg.Dimensions, buildEgressPolicy(privacy))
+	return llmaudit.WrapEmbedder(embedder, "embedding", cfg.Provider.BaseURL, rec)
 }
 
-func buildEgressPolicy(privacy []config.PrivacyConfig) egress.Policy {
-	if len(privacy) == 0 {
-		return egress.Policy{Mode: egress.ModeExternalAllowed}
-	}
-	p := privacy[0]
+func buildEgressPolicy(p config.PrivacyConfig) egress.Policy {
 	return egress.Policy{Mode: p.Mode, AllowedDestinations: p.AllowedDestinations, AllowPrivateNetwork: p.AllowPrivateNetwork}
 }
 
@@ -92,4 +92,13 @@ func BuildPriceTable(cfg config.LLMConfig) llm.PriceTable {
 		DisplayCurrency: currency,
 		USDToDisplay:    rate,
 	}
+}
+
+// Providers builds the LLM router and embedder for this App's config. All
+// server and CLI paths use it so provider wiring (keys, egress policy) is
+// identical everywhere.
+func (a *App) Providers() (*llm.Router, llm.Embedder) {
+	secrets, _ := a.Secrets()
+	rec := a.Audit()
+	return BuildRouter(a.Config.LLM, secrets, a.Config.Privacy, rec), BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy, rec)
 }

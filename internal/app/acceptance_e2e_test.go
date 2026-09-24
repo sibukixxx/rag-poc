@@ -20,7 +20,7 @@ import (
 // surface — ingest, hybrid search, cited RAG chat, Golden Dataset with
 // judge, Before/After compare, Deployment, Runtime search/chat, prompt
 // snapshot immutability, restart persistence, token revocation, and
-// customer-data deletion.
+// customer-data deletion, and the security audit trail.
 // Only the model provider is replaced (by a loopback fake), and Private
 // Mode is on, so the run also proves no other destination is needed.
 func TestAcceptanceE2EMockProviderJourney(t *testing.T) {
@@ -139,6 +139,42 @@ func TestAcceptanceE2EMockProviderJourney(t *testing.T) {
 	srv.getJSON(t, "/api/v1/knowledge-bases", http.StatusOK, &remaining)
 	if len(remaining) != 0 {
 		t.Fatalf("knowledge bases after deletion = %+v, want none", remaining)
+	}
+
+	// 10. Security audit trail (#24): critical actions are recorded with
+	// actors and IDs, and the one-time token plaintext is nowhere in it.
+	auditBody := srv.do(t, http.MethodGet, "/api/v1/audit-events?limit=1000", "", "", http.StatusOK)
+	if strings.Contains(string(auditBody), tok.Token) {
+		t.Fatal("audit trail contains the runtime token plaintext")
+	}
+	var events []struct {
+		Action  string `json:"action"`
+		Outcome string `json:"outcome"`
+		Actor   string `json:"actor"`
+	}
+	decode(t, auditBody, &events)
+	seen := map[string]string{}
+	runtimeAttributed := false
+	for _, e := range events {
+		seen[e.Action+"/"+e.Outcome] = e.Actor
+		if e.Action == "provider.invoke" && strings.HasPrefix(e.Actor, "runtime_token:") {
+			runtimeAttributed = true
+		}
+	}
+	if !runtimeAttributed {
+		t.Error("no provider.invoke event is attributed to the runtime token that caused it")
+	}
+	for _, want := range []string{
+		"deployment.create/success", "runtime_token.issue/success", "runtime_token.revoke/success",
+		"runtime_token.rejected/denied", "knowledge_base.delete/denied", "knowledge_base.delete/success",
+		"provider.invoke/success",
+	} {
+		if _, ok := seen[want]; !ok {
+			t.Errorf("audit trail has no %s event; recorded: %v", want, seen)
+		}
+	}
+	if actor := seen["runtime_token.issue/success"]; actor != "http:127.0.0.1" {
+		t.Errorf("token issuance actor = %q, want the management client address", actor)
 	}
 
 	if provider.requestCount() == 0 {

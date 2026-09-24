@@ -16,6 +16,7 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
 	"github.com/sibukixxx/rag-poc/internal/adapter/vecmem"
+	"github.com/sibukixxx/rag-poc/internal/config"
 	forgehttp "github.com/sibukixxx/rag-poc/internal/http"
 	forgehandler "github.com/sibukixxx/rag-poc/internal/http/handler"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
@@ -29,9 +30,7 @@ func (a *App) Handler() (http.Handler, error) {
 	// still serves fine as long as providers resolve their key via
 	// api_key_env (the default). BuildRouter/BuildEmbedder tolerate a nil
 	// store.
-	secrets, _ := a.Secrets()
-
-	router := BuildRouter(a.Config.LLM, secrets, a.Config.Privacy)
+	router, embedder := a.Providers()
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	chat := usecase.NewChatUseCase(router, prices, traces)
@@ -41,7 +40,6 @@ func (a *App) Handler() (http.Handler, error) {
 		return nil, fmt.Errorf("loading tokenizer: %w", err)
 	}
 	knowledgeStore := sqlite.NewKnowledgeStore(a.DB)
-	embedder := BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
 	ingest := usecase.NewIngestUseCase(knowledgeStore, extractor.NewDefaultRegistry(), tok, embedder, prices, traces)
 
 	// Hybrid Search: vecmem (embedded brute-force cosine) + FTS5 trigram,
@@ -73,10 +71,14 @@ func (a *App) Handler() (http.Handler, error) {
 	deploymentUC := usecase.NewDeploymentUseCase(deploymentStore, knowledgeStore, promptStore, router)
 	runtimeUC := usecase.NewRuntimeUseCase(deploymentStore, search, ragChat)
 	lifecycleUC := a.DataLifecycle()
+	auditStore := a.Audit()
+	deploymentUC.Audit = auditStore
+	runtimeUC.Audit = auditStore
 
 	demoAuthEnabled := envBool("FORGEAI_DEMO_AUTH_ENABLED")
 	requireCloudflare := envBool("FORGEAI_REQUIRE_CLOUDFLARE_ACCESS")
 	demoAuthUC := usecase.NewDemoAccessUseCase(sqlite.NewDemoAccessStore(a.DB), usecase.DefaultDemoSessionDuration)
+	demoAuthUC.Audit = auditStore
 	demoAuthHandler := forgehandler.NewDemoAuthHandler(demoAuthUC, demoAuthEnabled, requireCloudflare)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
@@ -95,6 +97,7 @@ func (a *App) Handler() (http.Handler, error) {
 		Deployments: deploymentUC,
 		Runtime:     runtimeUC,
 		Lifecycle:   lifecycleUC,
+		Audit:       auditStore,
 		DemoAuth:    demoAuthHandler,
 	})
 
@@ -107,6 +110,14 @@ func (a *App) Serve() error {
 	handler, err := a.Handler()
 	if err != nil {
 		return err
+	}
+	recordStartup(context.Background(), a.Audit(), a.Config, Version)
+	if a.Config.Profile == config.ProfileProduction {
+		for _, c := range productionProfileChecks(a.Config, envBool("FORGEAI_DEMO_AUTH_ENABLED")) {
+			if !c.OK {
+				log.Printf("WARNING production profile: %s: %s", c.Name, c.Info)
+			}
+		}
 	}
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
@@ -156,8 +167,13 @@ func envBool(name string) bool {
 // DataLifecycle builds the customer-data deletion/retention use case from
 // the configured retention policy. The HTTP API and `forgeai data` share it.
 func (a *App) DataLifecycle() *usecase.DataLifecycleUseCase {
-	return usecase.NewDataLifecycleUseCase(sqlite.NewLifecycleStore(a.DB), usecase.RetentionPolicy{
+	uc := usecase.NewDataLifecycleUseCase(sqlite.NewLifecycleStore(a.DB), usecase.RetentionPolicy{
 		TraceDays:         a.Config.Retention.TraceDays,
 		EvaluationRunDays: a.Config.Retention.EvaluationRunDays,
+		AuditDays:         a.Config.Retention.AuditDays,
 	})
+	auditStore := a.Audit()
+	uc.Audit = auditStore
+	uc.AuditRetention = auditStore
+	return uc
 }

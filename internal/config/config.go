@@ -12,6 +12,10 @@ import (
 )
 
 type Config struct {
+	// Profile is "development" (default) or "production". The production
+	// profile makes `forgeai doctor` fail on settings that are acceptable
+	// for demos but unsafe for customer data (#24).
+	Profile   string          `yaml:"profile"`
 	Server    ServerConfig    `yaml:"server"`
 	Database  DatabaseConfig  `yaml:"database"`
 	Storage   StorageConfig   `yaml:"storage"`
@@ -45,7 +49,22 @@ type SecurityConfig struct {
 	// (FTS needs it), so confidential corpora require an encrypted volume
 	// provided by the infrastructure. "" means nothing has been declared.
 	StorageAtRest string `yaml:"storage_at_rest"`
+	// ManagementBoundary records how the management UI/API (/api/v1) is
+	// protected. ForgeAI's own demo accounts share one workspace and are not
+	// a production identity boundary, so production deployments put the
+	// management surface behind an authenticating reverse proxy (Cloudflare
+	// Access, OAuth2 Proxy, an SSO gateway...). "" means not declared.
+	ManagementBoundary string `yaml:"management_boundary"`
 }
+
+const (
+	ProfileDevelopment = "development"
+	ProfileProduction  = "production"
+
+	// ManagementBoundaryReverseProxyIdentity declares that /api/v1 and the UI
+	// are only reachable through an authenticating reverse proxy.
+	ManagementBoundaryReverseProxyIdentity = "reverse_proxy_identity"
+)
 
 // StorageAtRestOperatorEncryptedVolume declares that the database lives on
 // a volume encrypted by the host/cloud (FileVault, LUKS, EBS encryption...).
@@ -56,6 +75,8 @@ const StorageAtRestOperatorEncryptedVolume = "operator_encrypted_volume"
 type RetentionConfig struct {
 	TraceDays         int `yaml:"traces_days"`
 	EvaluationRunDays int `yaml:"evaluation_runs_days"`
+	// AuditDays is separate so security records can outlive ordinary traces.
+	AuditDays int `yaml:"audit_days"`
 }
 
 // PrivacyConfig controls outbound provider traffic. external_allowed preserves
@@ -202,6 +223,19 @@ func (c Config) validate() error {
 	if c.Retention.EvaluationRunDays < 0 {
 		return fmt.Errorf("retention.evaluation_runs_days must be >= 0 (0 keeps runs), got %d", c.Retention.EvaluationRunDays)
 	}
+	if c.Retention.AuditDays < 0 {
+		return fmt.Errorf("retention.audit_days must be >= 0 (0 keeps audit events), got %d", c.Retention.AuditDays)
+	}
+	switch c.Profile {
+	case "", ProfileDevelopment, ProfileProduction:
+	default:
+		return fmt.Errorf("profile must be %q or %q, got %q", ProfileDevelopment, ProfileProduction, c.Profile)
+	}
+	switch c.Security.ManagementBoundary {
+	case "", ManagementBoundaryReverseProxyIdentity:
+	default:
+		return fmt.Errorf("security.management_boundary must be \"\" or %q, got %q", ManagementBoundaryReverseProxyIdentity, c.Security.ManagementBoundary)
+	}
 	switch c.Security.StorageAtRest {
 	case "", StorageAtRestOperatorEncryptedVolume:
 	default:
@@ -224,6 +258,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("FORGEAI_PRIVACY_MODE"); ok {
 		cfg.Privacy.Mode = v
+	}
+	if v, ok := os.LookupEnv("FORGEAI_PROFILE"); ok {
+		cfg.Profile = v
 	}
 }
 

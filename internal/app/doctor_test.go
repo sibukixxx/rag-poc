@@ -1,6 +1,7 @@
 package app
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -74,8 +75,42 @@ func TestRetentionCheckDescribesPolicy(t *testing.T) {
 
 	got := retentionCheck(cfg)
 
-	want := CheckStatus{Name: "Retention", OK: true, Info: "traces=30d evaluation_runs=keep (apply with `forgeai data retention`)"}
+	want := CheckStatus{Name: "Retention", OK: true, Info: "traces=30d evaluation_runs=keep audit=keep (apply with `forgeai data retention`)"}
 	if got != want {
 		t.Fatalf("retentionCheck = %+v, want %+v", got, want)
+	}
+}
+
+func TestProductionProfileChecksFailOnSharedDemoAuthAndUndeclaredBoundaries(t *testing.T) {
+	cfg := config.Default()
+	cfg.Profile = config.ProfileProduction
+
+	got := productionProfileChecks(cfg, true)
+
+	want := []CheckStatus{
+		{Name: "Production tenancy", OK: false, Info: "demo authentication is enabled: demo accounts share one ForgeAI workspace and are not tenant isolation; run one ForgeAI instance per customer and disable FORGEAI_DEMO_AUTH_ENABLED"},
+		{Name: "Production management boundary", OK: false, Info: "not declared: put /api/v1 and the UI behind an authenticating reverse proxy and set security.management_boundary: reverse_proxy_identity"},
+		{Name: "Production storage at rest", OK: false, Info: "not declared: set security.storage_at_rest: operator_encrypted_volume once the database is on an encrypted volume"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("productionProfileChecks:\nwant %+v\ngot  %+v", want, got)
+	}
+}
+
+func TestProductionProfileChecksPassWhenSingleTenantAndDeclared(t *testing.T) {
+	cfg := config.Default()
+	cfg.Profile = config.ProfileProduction
+	cfg.Security.ManagementBoundary = config.ManagementBoundaryReverseProxyIdentity
+	cfg.Security.StorageAtRest = config.StorageAtRestOperatorEncryptedVolume
+
+	got := productionProfileChecks(cfg, false)
+
+	want := []CheckStatus{
+		{Name: "Production tenancy", OK: true, Info: "single-tenant: one ForgeAI instance serves one customer security boundary"},
+		{Name: "Production management boundary", OK: true, Info: "operator declares an authenticating reverse proxy (not verified by ForgeAI)"},
+		{Name: "Production storage at rest", OK: true, Info: "operator declares an encrypted volume (not verified by ForgeAI)"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("productionProfileChecks:\nwant %+v\ngot  %+v", want, got)
 	}
 }

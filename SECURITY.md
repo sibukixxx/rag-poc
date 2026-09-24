@@ -73,6 +73,13 @@ We will acknowledge receipt within 48 hours and provide updates within 7 days.
 - Deletion does not reach backups, snapshots, or data already sent to an external provider
 - Full inventory: [docs/security/DATA_LIFECYCLE.md](docs/security/DATA_LIFECYCLE.md)
 
+### Audit Trail and Production Profile
+
+- Security-relevant actions (token issue/revoke/rejection, deployment creation, deletions, demo logins, provider invocations, secret changes, server start) are recorded in `audit_events` without secrets, prompts, or document text
+- `profile: production` makes `forgeai doctor` fail when demo authentication is on or when the management boundary / encrypted storage is not declared
+- v0.1 is single-tenant: one ForgeAI instance per customer security boundary
+- Details: [docs/security/AUDIT_TRAIL.md](docs/security/AUDIT_TRAIL.md)
+
 ## Deployment Hardening
 
 - Always deploy customer demos behind Cloudflare Access and enable ForgeAI demo authentication
@@ -84,7 +91,9 @@ We will acknowledge receipt within 48 hours and provide updates within 7 days.
 
 - **v0.1 Alpha**: API and config may change without notice
 - **No multi-tenancy**: Single master key for all secrets
-- **No tenant isolation**: Demo accounts share one ForgeAI workspace; use only approved sample data
+- **No tenant isolation**: Demo accounts share one ForgeAI workspace; use only approved sample data. Production is one ForgeAI instance per customer
+- **No built-in production login for the management API**: put `/api/v1` and the UI behind an authenticating reverse proxy
+- **CLI actor identity is not authenticated**: audit events from the CLI carry the OS user name as a label
 - **LLM model choice**: Providers and models impact security; use trusted models only
 
 ## Supported Versions
