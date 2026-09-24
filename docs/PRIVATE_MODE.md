@@ -28,3 +28,5 @@ Run `forgeai doctor -config forgeai.yaml` to inspect the active mode and every c
 Enforcement is attached to the OpenAI-compatible HTTP transport, so chat, RAG, judge, rerank, and embedding traffic share the same boundary. An exact allowlist item is an origin (scheme, host, and port); URL paths do not broaden access.
 
 Private Mode means content is not transmitted to an unapproved provider endpoint. A provider statement that data is “not used for training” is different: the data is still transmitted to that provider. Private Mode also does not replace host firewall, DNS, proxy, or administrator controls.
+
+When an external provider is intentionally allowed, `privacy.outbound_policy` can block or redact known identifier formats before transmission. It is deterministic pattern matching, not a guarantee that personal data is removed. See `docs/security/SENSITIVE_DATA_POLICY.md`.

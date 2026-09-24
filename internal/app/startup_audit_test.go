@@ -19,7 +19,7 @@ func (m *memoryAudit) Record(_ context.Context, e audit.Event) error {
 func TestRecordStartupAuditsProfileAndEgressDestinationsWithoutKeys(t *testing.T) {
 	cfg := config.Default()
 	cfg.Profile = config.ProfileProduction
-	cfg.Privacy = config.PrivacyConfig{Mode: "local_only", AllowedDestinations: []string{"https://llm.internal:8443"}}
+	cfg.Privacy = config.PrivacyConfig{Mode: "local_only", OutboundPolicy: "deny_sensitive", AllowedDestinations: []string{"https://llm.internal:8443"}}
 	cfg.LLM.Providers["default"] = config.ProviderConfig{Type: "openai_compatible", BaseURL: "https://user:pw@llm.internal:8443/v1?x=1", APIKeyEnv: "SECRET_ENV"}
 	cfg.Embedding.Provider.BaseURL = "http://127.0.0.1:11434/v1"
 	rec := &memoryAudit{}
@@ -30,7 +30,7 @@ func TestRecordStartupAuditsProfileAndEgressDestinationsWithoutKeys(t *testing.T
 		t.Fatalf("events = %+v", rec.events)
 	}
 	want := map[string]string{
-		"version": "v-test", "profile": "production", "privacy_mode": "local_only",
+		"version": "v-test", "profile": "production", "privacy_mode": "local_only", "outbound_policy": "deny_sensitive",
 		"allowed_destinations": "https://llm.internal:8443",
 		"llm_endpoints":        "default=https://llm.internal:8443",
 		"embedding_endpoint":   "http://127.0.0.1:11434",

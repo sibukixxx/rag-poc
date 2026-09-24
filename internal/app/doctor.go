@@ -33,6 +33,7 @@ func Doctor(configPath string) []CheckStatus {
 	}
 	checks = append(checks, CheckStatus{Name: "Config", OK: true, Info: "loaded"})
 	checks = append(checks, privacyCheck(cfg))
+	checks = append(checks, outboundPolicyCheck(cfg))
 	checks = append(checks, storageAtRestCheck(cfg), retentionCheck(cfg))
 
 	if err := cfg.EnsureDirs(); err != nil {
@@ -220,4 +221,23 @@ func productionProfileChecks(cfg config.Config, demoAuthEnabled bool) []CheckSta
 		storage = CheckStatus{Name: "Production storage at rest", OK: false, Info: "not declared: set security.storage_at_rest: operator_encrypted_volume once the database is on an encrypted volume"}
 	}
 	return []CheckStatus{tenancy, boundary, storage}
+}
+
+// outboundPolicyCheck states which sensitive-data policy applies to text
+// sent to providers and what its detection does not cover (#25).
+func outboundPolicyCheck(cfg config.Config) CheckStatus {
+	name := "Outbound sensitive data"
+	policy := cfg.Privacy.OutboundPolicy
+	if policy == "" || policy == "allow" {
+		return CheckStatus{Name: name, OK: true, Info: "policy=allow: retrieved text and questions are sent to providers unchanged"}
+	}
+	rules := make([]string, len(cfg.Privacy.SensitiveRules))
+	for i, r := range cfg.Privacy.SensitiveRules {
+		rules[i] = r.Name
+	}
+	info := fmt.Sprintf("policy=%s detectors=%s", policy, strings.Join(cfg.Privacy.Detectors(), ","))
+	if len(rules) > 0 {
+		info += " rules=" + strings.Join(rules, ",")
+	}
+	return CheckStatus{Name: name, OK: true, Info: info + " (deterministic patterns only; other personal data is not detected)"}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ type fakeProvider struct {
 	mu            sync.Mutex
 	systemPrompts []string
 	requests      int
+	bodies        []string
 }
 
 func newFakeProvider(t *testing.T, dims int) *fakeProvider {
@@ -58,11 +60,26 @@ func (f *fakeProvider) requestCount() int {
 	return f.requests
 }
 
+// requestBodies returns every raw request body the provider received.
+func (f *fakeProvider) requestBodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.bodies...)
+}
+
+func (f *fakeProvider) readBody(r *http.Request) []byte {
+	data, _ := io.ReadAll(r.Body)
+	f.mu.Lock()
+	f.bodies = append(f.bodies, string(data))
+	f.mu.Unlock()
+	return data
+}
+
 func (f *fakeProvider) embeddings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Input []string `json:"input"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(f.readBody(r), &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -118,7 +135,7 @@ func (f *fakeProvider) chat(w http.ResponseWriter, r *http.Request) {
 		} `json:"messages"`
 		Stream bool `json:"stream"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(f.readBody(r), &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

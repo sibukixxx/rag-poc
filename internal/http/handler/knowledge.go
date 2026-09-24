@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
+	"github.com/sibukixxx/rag-poc/internal/domain/outbound"
 	"github.com/sibukixxx/rag-poc/internal/domain/retrieval"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -220,6 +221,10 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results, err := h.search.Search(r.Context(), kbID, req.Query, retrieval.Options{TopK: req.TopK, Rerank: req.Rerank})
+	if errors.Is(err, outbound.ErrBlocked) {
+		writeProviderError(w, err, "")
+		return
+	}
 	if err != nil {
 		internalError(w, "searching knowledge base", err)
 		return
@@ -304,7 +309,7 @@ func (h *KnowledgeHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	result, err := h.ragChat.ChatStream(r.Context(), kbID, req.Alias, req.Query, req.Rerank)
 	if err != nil {
 		log.Printf("knowledge: rag chat kb=%s alias=%q: %v", kbID, req.Alias, err)
-		http.Error(w, "chat failed", http.StatusBadGateway)
+		writeProviderError(w, err, "chat failed")
 		return
 	}
 

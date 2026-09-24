@@ -49,7 +49,10 @@ func (a *App) Ingest() (*usecase.IngestUseCase, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading tokenizer: %w", err)
 	}
-	_, embedder := a.Providers()
+	_, embedder, err := a.Providers()
+	if err != nil {
+		return nil, err
+	}
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	return usecase.NewIngestUseCase(a.Knowledge(), extractor.NewDefaultRegistry(), tok, embedder, prices, traces), nil
@@ -60,7 +63,10 @@ func (a *App) Ingest() (*usecase.IngestUseCase, error) {
 // a real query goes through, so a run's metrics reflect production
 // retrieval behavior exactly.
 func (a *App) Evaluation() (eval.Store, *usecase.EvaluationUseCase, error) {
-	router, embedder := a.Providers()
+	router, embedder, err := a.Providers()
+	if err != nil {
+		return nil, nil, err
+	}
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 

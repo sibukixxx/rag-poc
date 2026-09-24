@@ -30,7 +30,10 @@ func (a *App) Handler() (http.Handler, error) {
 	// still serves fine as long as providers resolve their key via
 	// api_key_env (the default). BuildRouter/BuildEmbedder tolerate a nil
 	// store.
-	router, embedder := a.Providers()
+	router, embedder, err := a.Providers()
+	if err != nil {
+		return nil, err
+	}
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	chat := usecase.NewChatUseCase(router, prices, traces)

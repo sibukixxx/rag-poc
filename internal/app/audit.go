@@ -30,6 +30,10 @@ func recordStartup(ctx context.Context, rec audit.Recorder, cfg config.Config, v
 	if mode == "" {
 		mode = "external_allowed"
 	}
+	outboundPolicy := cfg.Privacy.OutboundPolicy
+	if outboundPolicy == "" {
+		outboundPolicy = "allow"
+	}
 	names := make([]string, 0, len(cfg.LLM.Providers))
 	for name := range cfg.LLM.Providers {
 		names = append(names, name)
@@ -47,7 +51,7 @@ func recordStartup(ctx context.Context, rec audit.Recorder, cfg config.Config, v
 		OccurredAt: time.Now(), Action: audit.ActionServerStart, Outcome: audit.OutcomeSuccess,
 		Actor: audit.ActorFrom(ctx),
 		Metadata: map[string]string{
-			"version": version, "profile": profile, "privacy_mode": mode,
+			"version": version, "profile": profile, "privacy_mode": mode, "outbound_policy": outboundPolicy,
 			"allowed_destinations": strings.Join(allowed, ","),
 			"llm_endpoints":        strings.Join(llmEndpoints, ","),
 			"embedding_endpoint":   urlOrigin(cfg.Embedding.Provider.BaseURL),

@@ -9,6 +9,8 @@ import (
 	"strconv"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/sibukixxx/rag-poc/internal/domain/outbound"
 )
 
 type Config struct {
@@ -86,6 +88,24 @@ type PrivacyConfig struct {
 	Mode                string   `yaml:"mode"`
 	AllowedDestinations []string `yaml:"allowed_destinations"`
 	AllowPrivateNetwork bool     `yaml:"allow_private_network"`
+	// OutboundPolicy is the sensitive-data policy for text sent to model
+	// providers (#25): allow (default), deny_sensitive, redact_known_patterns.
+	OutboundPolicy string `yaml:"outbound_policy"`
+	// SensitiveDetectors selects builtin detectors; nil means email+phone.
+	SensitiveDetectors []string `yaml:"sensitive_detectors"`
+	// SensitiveRules adds operator-defined RE2 patterns.
+	SensitiveRules []outbound.Rule `yaml:"sensitive_rules"`
+}
+
+// DefaultSensitiveDetectors apply when sensitive_detectors is omitted.
+var DefaultSensitiveDetectors = []string{"email", "phone"}
+
+// Detectors returns the configured builtin detectors or the defaults.
+func (p PrivacyConfig) Detectors() []string {
+	if p.SensitiveDetectors == nil {
+		return DefaultSensitiveDetectors
+	}
+	return p.SensitiveDetectors
 }
 
 // LLMConfig configures the LLM Router: named providers, business-facing
@@ -226,6 +246,12 @@ func (c Config) validate() error {
 	if c.Retention.AuditDays < 0 {
 		return fmt.Errorf("retention.audit_days must be >= 0 (0 keeps audit events), got %d", c.Retention.AuditDays)
 	}
+	if _, err := outbound.ParsePolicy(c.Privacy.OutboundPolicy); err != nil {
+		return fmt.Errorf("privacy.outbound_policy: %w", err)
+	}
+	if _, err := outbound.NewDetector(c.Privacy.Detectors(), c.Privacy.SensitiveRules); err != nil {
+		return fmt.Errorf("privacy: %w", err)
+	}
 	switch c.Profile {
 	case "", ProfileDevelopment, ProfileProduction:
 	default:
@@ -258,6 +284,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("FORGEAI_PRIVACY_MODE"); ok {
 		cfg.Privacy.Mode = v
+	}
+	if v, ok := os.LookupEnv("FORGEAI_OUTBOUND_POLICY"); ok {
+		cfg.Privacy.OutboundPolicy = v
 	}
 	if v, ok := os.LookupEnv("FORGEAI_PROFILE"); ok {
 		cfg.Profile = v
