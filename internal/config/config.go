@@ -26,6 +26,24 @@ type Config struct {
 	LLM       LLMConfig       `yaml:"llm"`
 	Embedding EmbeddingConfig `yaml:"embedding"`
 	Retention RetentionConfig `yaml:"retention"`
+	Sources   SourcesConfig   `yaml:"sources"`
+}
+
+// SourcesConfig configures source connectors that the server runs.
+type SourcesConfig struct {
+	Filesystem FilesystemSourceConfig `yaml:"filesystem"`
+}
+
+// FilesystemSourceConfig bounds local/NAS bulk ingestion (#30).
+type FilesystemSourceConfig struct {
+	// AllowedRoots are the only host directories that may be registered as
+	// sources. Empty disables filesystem sources, so the management API can
+	// never be used to read arbitrary server files.
+	AllowedRoots []string `yaml:"allowed_roots"`
+	// Workers is the number of files processed concurrently (0 = default 4).
+	Workers int `yaml:"workers"`
+	// MaxFileBytes skips larger files (0 = default 32 MiB).
+	MaxFileBytes int64 `yaml:"max_file_bytes"`
 }
 
 type ServerConfig struct {
@@ -251,6 +269,17 @@ func (c Config) validate() error {
 	}
 	if _, err := outbound.NewDetector(c.Privacy.Detectors(), c.Privacy.SensitiveRules); err != nil {
 		return fmt.Errorf("privacy: %w", err)
+	}
+	for _, root := range c.Sources.Filesystem.AllowedRoots {
+		if !filepath.IsAbs(root) {
+			return fmt.Errorf("sources.filesystem.allowed_roots: %q must be an absolute path", root)
+		}
+	}
+	if w := c.Sources.Filesystem.Workers; w < 0 || w > 64 {
+		return fmt.Errorf("sources.filesystem.workers must be between 0 and 64, got %d", w)
+	}
+	if c.Sources.Filesystem.MaxFileBytes < 0 {
+		return fmt.Errorf("sources.filesystem.max_file_bytes must be >= 0, got %d", c.Sources.Filesystem.MaxFileBytes)
 	}
 	switch c.Profile {
 	case "", ProfileDevelopment, ProfileProduction:

@@ -84,6 +84,11 @@ func (a *App) Handler() (http.Handler, error) {
 	demoAuthUC.Audit = auditStore
 	demoAuthHandler := forgehandler.NewDemoAuthHandler(demoAuthUC, demoAuthEnabled, requireCloudflare)
 
+	runner, err := a.jobs()
+	if err != nil {
+		return nil, err
+	}
+
 	handler := forgehttp.NewRouter(forgehttp.Deps{
 		DB:          a.DB,
 		Version:     Version,
@@ -101,6 +106,8 @@ func (a *App) Handler() (http.Handler, error) {
 		Runtime:     runtimeUC,
 		Lifecycle:   lifecycleUC,
 		Audit:       auditStore,
+		BulkIngest:  runner.uc,
+		Scheduler:   runner,
 		DemoAuth:    demoAuthHandler,
 	})
 
@@ -115,6 +122,7 @@ func (a *App) Serve() error {
 		return err
 	}
 	recordStartup(context.Background(), a.Audit(), a.Config, Version)
+	a.StartBackground()
 	if a.Config.Profile == config.ProfileProduction {
 		for _, c := range productionProfileChecks(a.Config, envBool("FORGEAI_DEMO_AUTH_ENABLED")) {
 			if !c.OK {

@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
@@ -17,6 +18,9 @@ var Version = "dev"
 type App struct {
 	Config config.Config
 	DB     *sql.DB
+
+	runnerMu sync.Mutex
+	runner   *jobRunner
 }
 
 // Bootstrap loads configuration, ensures data directories exist, and opens
@@ -57,6 +61,12 @@ func (a *App) Secrets() (secret.Store, error) {
 }
 
 func (a *App) Close() error {
+	a.runnerMu.Lock()
+	if a.runner != nil {
+		a.runner.stop()
+		a.runner = nil
+	}
+	a.runnerMu.Unlock()
 	if a.DB != nil {
 		return a.DB.Close()
 	}

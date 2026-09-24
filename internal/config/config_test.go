@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/sibukixxx/rag-poc/internal/config"
@@ -106,6 +107,50 @@ func TestLoadRejectsInvalidRetentionAndStorageAtRest(t *testing.T) {
 		{"unknown storage declaration", "security:\n  storage_at_rest: encrypted\n", `security.storage_at_rest must be "" or "operator_encrypted_volume", got "encrypted"`},
 		{"unknown outbound policy", "privacy:\n  outbound_policy: block\n", `privacy.outbound_policy: outbound policy must be one of allow, deny_sensitive, redact_known_patterns; got "block"`},
 		{"malformed sensitive rule", "privacy:\n  sensitive_rules:\n    - name: acct\n      pattern: 'ACCT-(\\d+'\n", "privacy: sensitive rule \"acct\": invalid pattern: error parsing regexp: missing closing ): `ACCT-(\\d+`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "forgeai.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := config.Load(path)
+
+			if err == nil || err.Error() != "invalid config "+path+": "+tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadParsesFilesystemSourceSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "forgeai.yaml")
+	yaml := "sources:\n  filesystem:\n    allowed_roots: [/srv/share, /mnt/nas]\n    workers: 8\n    max_file_bytes: 1048576\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.FilesystemSourceConfig{AllowedRoots: []string{"/srv/share", "/mnt/nas"}, Workers: 8, MaxFileBytes: 1048576}
+	if !reflect.DeepEqual(cfg.Sources.Filesystem, want) {
+		t.Fatalf("filesystem sources = %+v, want %+v", cfg.Sources.Filesystem, want)
+	}
+}
+
+func TestLoadRejectsInvalidFilesystemSourceSettings(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"relative root", "sources:\n  filesystem:\n    allowed_roots: [share]\n", `sources.filesystem.allowed_roots: "share" must be an absolute path`},
+		{"too many workers", "sources:\n  filesystem:\n    workers: 100\n", "sources.filesystem.workers must be between 0 and 64, got 100"},
+		{"negative size", "sources:\n  filesystem:\n    max_file_bytes: -1\n", "sources.filesystem.max_file_bytes must be >= 0, got -1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

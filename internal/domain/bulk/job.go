@@ -41,17 +41,17 @@ const (
 
 // Job is one durable bulk-ingestion run over a source connection.
 type Job struct {
-	ID            string
-	ConnectionID  string
-	Status        JobStatus
-	DiscoveryDone bool
-	Scan          ScanSummary
-	Deleted       int
-	LastError     string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
+	ID            string      `json:"id"`
+	ConnectionID  string      `json:"connection_id"`
+	Status        JobStatus   `json:"status"`
+	DiscoveryDone bool        `json:"discovery_done"`
+	Scan          ScanSummary `json:"scan"`
+	Deleted       int         `json:"deleted"`
+	LastError     string      `json:"last_error,omitempty"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+	StartedAt     *time.Time  `json:"started_at,omitempty"`
+	FinishedAt    *time.Time  `json:"finished_at,omitempty"`
 }
 
 // Counts summarise a job's files by state.
@@ -66,13 +66,13 @@ type Counts struct {
 
 // Item is one file of a job.
 type Item struct {
-	JobID    string
-	Path     string
-	Size     int64
-	ModTime  int64
-	Status   ItemStatus
-	Attempts int
-	Error    string
+	JobID    string     `json:"-"`
+	Path     string     `json:"path"`
+	Size     int64      `json:"size"`
+	ModTime  int64      `json:"mod_time"`
+	Status   ItemStatus `json:"status"`
+	Attempts int        `json:"attempts"`
+	Error    string     `json:"error,omitempty"`
 }
 
 // Store persists jobs and per-file progress so a job survives restarts.

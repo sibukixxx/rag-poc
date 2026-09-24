@@ -43,6 +43,33 @@ type FilesystemSourceConfig struct {
 	Exclude []string `json:"exclude,omitempty"`
 }
 
+// ErrInvalidSourceConfig marks operator input the server refuses (a root
+// outside the allowlist, a malformed pattern). Its messages are safe to
+// return to the operator.
+var ErrInvalidSourceConfig = errors.New("invalid source configuration")
+
+type invalidSourceError struct{ err error }
+
+func (e invalidSourceError) Error() string        { return e.err.Error() }
+func (e invalidSourceError) Unwrap() error        { return e.err }
+func (e invalidSourceError) Is(target error) bool { return target == ErrInvalidSourceConfig }
+
+// ErrJobStateConflict is returned when a pause/cancel/resume request does
+// not apply to the job's current state.
+var ErrJobStateConflict = errors.New("ingestion job state conflict")
+
+// ConnectionStatus is one source connection with its latest job.
+type ConnectionStatus struct {
+	ID              string                  `json:"id"`
+	KnowledgeBaseID string                  `json:"knowledge_base_id"`
+	Provider        string                  `json:"provider"`
+	Name            string                  `json:"name"`
+	Enabled         bool                    `json:"enabled"`
+	Filesystem      *FilesystemSourceConfig `json:"filesystem,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	LatestJob       *JobProgress            `json:"latest_job,omitempty"`
+}
+
 // JobProgress is what operators see for one job.
 type JobProgress struct {
 	Job      bulk.Job    `json:"job"`
@@ -108,11 +135,11 @@ func (u *BulkIngestUseCase) resolveRoot(root string) (string, error) {
 func (u *BulkIngestUseCase) CreateFilesystemConnection(ctx context.Context, knowledgeBaseID, name string, cfg FilesystemSourceConfig) (*source.Connection, error) {
 	root, err := u.resolveRoot(cfg.Root)
 	if err != nil {
-		return nil, err
+		return nil, invalidSourceError{err}
 	}
 	cfg.Root = root
 	if err := (bulk.Rules{Include: cfg.Include, Exclude: cfg.Exclude}).Validate(); err != nil {
-		return nil, err
+		return nil, invalidSourceError{err}
 	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
@@ -143,14 +170,14 @@ func (u *BulkIngestUseCase) filesystemConnection(ctx context.Context, connection
 		return nil, cfg, err
 	}
 	if conn.Provider != FilesystemProvider {
-		return nil, cfg, fmt.Errorf("source connection %s is not a filesystem source", connectionID)
+		return nil, cfg, invalidSourceError{fmt.Errorf("source connection %s is not a filesystem source", connectionID)}
 	}
 	if err := json.Unmarshal(conn.Config, &cfg); err != nil {
 		return nil, cfg, fmt.Errorf("decoding filesystem source config: %w", err)
 	}
 	// Re-check on every use: the allowlist may have been narrowed since.
 	if _, err := u.resolveRoot(cfg.Root); err != nil {
-		return nil, cfg, err
+		return nil, cfg, invalidSourceError{err}
 	}
 	return conn, cfg, nil
 }
@@ -163,7 +190,7 @@ func (u *BulkIngestUseCase) StartJob(ctx context.Context, connectionID string) (
 		return nil, err
 	}
 	if !conn.Enabled {
-		return nil, fmt.Errorf("source connection %s is disabled", connectionID)
+		return nil, invalidSourceError{fmt.Errorf("source connection %s is disabled", connectionID)}
 	}
 	jobs, err := u.Jobs.ListJobs(ctx, connectionID, 20)
 	if err != nil {
@@ -171,7 +198,7 @@ func (u *BulkIngestUseCase) StartJob(ctx context.Context, connectionID string) (
 	}
 	for _, j := range jobs {
 		if !j.Status.Finished() {
-			return nil, fmt.Errorf("job %s is still %s for this connection", j.ID, j.Status)
+			return nil, fmt.Errorf("%w: job %s is still %s for this connection", ErrJobStateConflict, j.ID, j.Status)
 		}
 	}
 	now := u.Now()
@@ -194,7 +221,7 @@ func (u *BulkIngestUseCase) control(ctx context.Context, jobID, request string, 
 	}
 	recordAudit(ctx, u.Audit, audit.ActionIngestionJobControl, outcome, "ingestion_job:"+jobID, map[string]string{"request": request})
 	if !ok {
-		return fmt.Errorf("job %s cannot be %s in its current state", jobID, request+"d")
+		return fmt.Errorf("%w: job %s cannot be %s in its current state", ErrJobStateConflict, jobID, request+"d")
 	}
 	return nil
 }
@@ -232,6 +259,47 @@ func (u *BulkIngestUseCase) Progress(ctx context.Context, jobID string) (JobProg
 		failures = []bulk.Item{}
 	}
 	return JobProgress{Job: *job, Counts: counts, Failures: failures}, nil
+}
+
+// ListConnections returns a knowledge base's source connections with the
+// progress of each one's most recent job.
+func (u *BulkIngestUseCase) ListConnections(ctx context.Context, knowledgeBaseID string) ([]ConnectionStatus, error) {
+	conns, err := u.Sources.ListConnections(ctx, knowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ConnectionStatus, 0, len(conns))
+	for _, c := range conns {
+		st := ConnectionStatus{ID: c.ID, KnowledgeBaseID: c.KnowledgeBaseID, Provider: c.Provider, Name: c.Name, Enabled: c.Enabled, CreatedAt: c.CreatedAt}
+		if c.Provider == FilesystemProvider {
+			var cfg FilesystemSourceConfig
+			if json.Unmarshal(c.Config, &cfg) == nil {
+				st.Filesystem = &cfg
+			}
+		}
+		jobs, err := u.Jobs.ListJobs(ctx, c.ID, 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(jobs) == 1 {
+			p, err := u.Progress(ctx, jobs[0].ID)
+			if err != nil {
+				return nil, err
+			}
+			st.LatestJob = &p
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// ListJobs returns a connection's recent jobs, newest first.
+func (u *BulkIngestUseCase) ListJobs(ctx context.Context, connectionID string) ([]bulk.Job, error) {
+	jobs, err := u.Jobs.ListJobs(ctx, connectionID, 50)
+	if jobs == nil {
+		jobs = []bulk.Job{}
+	}
+	return jobs, err
 }
 
 // ResumeUnfinished runs every queued or interrupted job to completion, one
