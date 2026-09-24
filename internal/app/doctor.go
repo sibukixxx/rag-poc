@@ -33,6 +33,7 @@ func Doctor(configPath string) []CheckStatus {
 	}
 	checks = append(checks, CheckStatus{Name: "Config", OK: true, Info: "loaded"})
 	checks = append(checks, privacyCheck(cfg))
+	checks = append(checks, storageAtRestCheck(cfg), retentionCheck(cfg))
 
 	if err := cfg.EnsureDirs(); err != nil {
 		checks = append(checks, CheckStatus{Name: "Filesystem", OK: false, Info: err.Error()})
@@ -172,4 +173,28 @@ func missingKeyHint(p config.ProviderConfig) string {
 		ways = append(ways, "set api_key_secret: <name> in the provider config and run `forgeai secret set <name>`")
 	}
 	return "no API key (" + strings.Join(ways, " or ") + ")"
+}
+
+func storageAtRestCheck(cfg config.Config) CheckStatus {
+	name := "Storage at rest"
+	if cfg.Security.StorageAtRest == config.StorageAtRestOperatorEncryptedVolume {
+		return CheckStatus{Name: name, OK: true, Info: "operator declares an encrypted volume (not verified by ForgeAI)"}
+	}
+	return CheckStatus{
+		Name: name, OK: true,
+		Info: "not declared: chunk text is stored as plaintext in SQLite; put the database on an encrypted volume and set security.storage_at_rest: operator_encrypted_volume before ingesting confidential data",
+	}
+}
+
+func retentionCheck(cfg config.Config) CheckStatus {
+	days := func(n int) string {
+		if n == 0 {
+			return "keep"
+		}
+		return fmt.Sprintf("%dd", n)
+	}
+	return CheckStatus{
+		Name: "Retention", OK: true,
+		Info: fmt.Sprintf("traces=%s evaluation_runs=%s (apply with `forgeai data retention`)", days(cfg.Retention.TraceDays), days(cfg.Retention.EvaluationRunDays)),
+	}
 }

@@ -43,3 +43,39 @@ func TestEmbeddingCheckHintNamesConfiguredSecret(t *testing.T) {
 		t.Fatalf("hint should name the configured secret: %q", got.Info)
 	}
 }
+
+func TestStorageAtRestCheckReportsUndeclaredStorageAsPlaintextRisk(t *testing.T) {
+	got := storageAtRestCheck(config.Default())
+
+	want := CheckStatus{
+		Name: "Storage at rest", OK: true,
+		Info: "not declared: chunk text is stored as plaintext in SQLite; put the database on an encrypted volume and set security.storage_at_rest: operator_encrypted_volume before ingesting confidential data",
+	}
+	if got != want {
+		t.Fatalf("storageAtRestCheck = %+v, want %+v", got, want)
+	}
+}
+
+func TestStorageAtRestCheckReportsOperatorDeclaration(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.StorageAtRest = config.StorageAtRestOperatorEncryptedVolume
+
+	got := storageAtRestCheck(cfg)
+
+	want := CheckStatus{Name: "Storage at rest", OK: true, Info: "operator declares an encrypted volume (not verified by ForgeAI)"}
+	if got != want {
+		t.Fatalf("storageAtRestCheck = %+v, want %+v", got, want)
+	}
+}
+
+func TestRetentionCheckDescribesPolicy(t *testing.T) {
+	cfg := config.Default()
+	cfg.Retention = config.RetentionConfig{TraceDays: 30}
+
+	got := retentionCheck(cfg)
+
+	want := CheckStatus{Name: "Retention", OK: true, Info: "traces=30d evaluation_runs=keep (apply with `forgeai data retention`)"}
+	if got != want {
+		t.Fatalf("retentionCheck = %+v, want %+v", got, want)
+	}
+}
