@@ -56,6 +56,8 @@ type Deps struct {
 	Runtime     *usecase.RuntimeUseCase
 	Lifecycle   *usecase.DataLifecycleUseCase
 	Audit       audit.Store
+	BulkIngest  *usecase.BulkIngestUseCase
+	Scheduler   handler.JobScheduler
 	DemoAuth    *handler.DemoAuthHandler
 }
 
@@ -78,6 +80,7 @@ func NewRouter(deps Deps) http.Handler {
 	deployments := handler.NewDeploymentHandler(deps.Deployments, deps.Runtime)
 	lifecycleHandler := handler.NewLifecycleHandler(deps.Lifecycle)
 	auditHandler := handler.NewAuditHandler(deps.Audit)
+	sources := handler.NewSourceHandler(deps.BulkIngest, deps.Scheduler)
 	demoAuth := deps.DemoAuth
 
 	if demoAuth != nil {
@@ -110,6 +113,14 @@ func NewRouter(deps Deps) http.Handler {
 			r.Delete("/knowledge-bases/{id}", lifecycleHandler.DeleteKnowledgeBase)
 			r.Delete("/knowledge-bases/{id}/documents/{docID}", lifecycleHandler.DeleteDocument)
 			r.Get("/audit-events", auditHandler.List)
+
+			// #30 source connections and resumable bulk ingestion jobs.
+			r.With(limitBody(maxJSONBody)).Post("/source-connections", sources.CreateConnection)
+			r.Get("/source-connections", sources.ListConnections)
+			r.Post("/source-connections/{id}/jobs", sources.StartJob)
+			r.Get("/source-connections/{id}/jobs", sources.ListJobs)
+			r.Get("/ingestion-jobs/{id}", sources.GetJob)
+			r.Post("/ingestion-jobs/{id}/{action}", sources.ControlJob)
 			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/search", kb.Search)
 			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/chat", kb.Chat)
 			r.With(limitBody(maxJSONBody)).Post("/prompts", prompts.Create)

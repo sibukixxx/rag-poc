@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,12 +65,12 @@ func (u *IngestUseCase) IngestFile(ctx context.Context, knowledgeBaseID, filenam
 
 	loader, ok := u.Loaders.Find(filename, mimeType)
 	if !ok {
-		return u.failDocument(ctx, &doc, fmt.Errorf("unsupported file type for %q", filename))
+		return u.failDocument(ctx, &doc, unprocessable(fmt.Errorf("unsupported file type for %q", filename)))
 	}
 
 	pages, err := loadWithGuard(ctx, loader, data, knowledge.FileMeta{Filename: filename, MimeType: mimeType})
 	if err != nil {
-		return u.failDocument(ctx, &doc, fmt.Errorf("extracting text: %w", err))
+		return u.failDocument(ctx, &doc, unprocessable(fmt.Errorf("extracting text: %w", err)))
 	}
 	return u.ingestPages(ctx, &doc, pages)
 }
@@ -106,7 +107,7 @@ func (u *IngestUseCase) ingestPages(ctx context.Context, doc *knowledge.Document
 
 	chunkResults := u.Tokenizer.ChunkPages(pages, u.ChunkerConfig)
 	if len(chunkResults) == 0 {
-		return u.failDocument(ctx, doc, fmt.Errorf("no extractable text found in %q", doc.Filename))
+		return u.failDocument(ctx, doc, unprocessable(fmt.Errorf("no extractable text found in %q", doc.Filename)))
 	}
 
 	model := u.Embedder.Model()
@@ -284,3 +285,16 @@ func contentHash(text string, cfg tokenizer.ChunkerConfig, model string) string 
 	fmt.Fprintf(h, "%s\x00%d\x00%d\x00%s", text, cfg.MaxTokens, cfg.Overlap, model)
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// ErrUnprocessableDocument marks failures caused by the document itself
+// (unsupported type, broken file, no text). Retrying cannot fix them, so
+// bulk ingestion records them as failed on the first attempt.
+var ErrUnprocessableDocument = errors.New("unprocessable document")
+
+type unprocessableError struct{ err error }
+
+func (e unprocessableError) Error() string        { return e.err.Error() }
+func (e unprocessableError) Unwrap() error        { return e.err }
+func (e unprocessableError) Is(target error) bool { return target == ErrUnprocessableDocument }
+
+func unprocessable(err error) error { return unprocessableError{err: err} }

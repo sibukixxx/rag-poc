@@ -66,6 +66,45 @@ type Connector interface {
 - 本文サイズは32 MiB以下にする
 - APIトークンをログ、DB、同期エラーへ含めない
 
+## ファイルシステム / NAS ソース（#30）
+
+数千〜数十万ファイルのディレクトリを、ブラウザを開いたままにせずサーバー側で取り込む。
+
+```yaml
+sources:
+  filesystem:
+    allowed_roots: [/srv/share, /mnt/nas]   # ここ以外は登録できない。空なら無効
+    workers: 4                              # 同時処理ファイル数
+    max_file_bytes: 33554432                # これより大きいファイルは失敗扱い
+```
+
+```bash
+forgeai source add-fs -kb handbook -exclude drafts/ -exclude '*.tmp' /srv/share/handbook
+forgeai source sync <connection-id>        # 前景で実行し進捗を表示
+forgeai source job <job-id>                # 進捗と失敗ファイル
+forgeai source pause|cancel|resume <job-id>
+```
+
+HTTP API は `POST /api/v1/source-connections`（`provider: "filesystem"`）、`POST /api/v1/source-connections/{id}/jobs`、`GET /api/v1/ingestion-jobs/{id}`、`POST /api/v1/ingestion-jobs/{id}/pause|cancel|resume`。API から開始したジョブはサーバー内のランナーが 1 件ずつ実行し、`forgeai serve` 起動時に中断・待機中のジョブを再開する。
+
+### 挙動
+
+| 項目 | 挙動 |
+|---|---|
+| 識別子 | 接続 + ルートからの相対パス（`source_items.external_id`）。引用のファイル名も相対パスになる |
+| 走査 | ディレクトリのメタデータだけで列挙し、中身は読まない。1 万ファイルをファイルを開かずに列挙できることをテストで確認 |
+| 除外（既定） | `.env*`、`*.pem`、`*.key`、`id_rsa*`、`credentials*`、`.git/`、`.ssh/`、`.aws/` など。件数は `scan.excluded_sensitive` |
+| 除外（運用者） | `-include` / `-exclude`。`dir/` はディレクトリ接頭辞、それ以外は `path.Match` をパスとファイル名に適用 |
+| シンボリックリンク | 辿らない（件数のみ記録）。読み取りは `os.Root` 経由で、ルート外へは到達できない |
+| 未変更ファイル | サイズと mtime が同じなら読まない。内容ハッシュが同じなら再埋め込みしない |
+| 更新 | 新しい文書の取り込み成功後に旧文書・チャンク・埋め込み・FTS を置き換える |
+| 削除 | 走査が最後まで完了したジョブでのみ、消えたファイルを tombstone にして検索対象から外す |
+| 失敗 | 抽出不能ファイルは 1 回で失敗、一時的エラーは最大 3 回リトライ。1 件の失敗でジョブは止まらない |
+| 中断・再開 | ファイル単位の状態を `ingestion_job_items` に保存。強制終了後も完了済みファイルは再処理せず、途中だった文書は片付けてから再処理する |
+| 一時停止・中止 | 処理中バッチの完了後に反映する |
+
+分散キューや複数ノードのワーカーは対象外。現行の SQLite 総当たりベクトル検索は数百万チャンク規模を想定していない。
+
 ## 次の実装
 
 最初の実コネクタはSlack読み取り専用とする。

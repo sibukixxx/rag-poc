@@ -18,9 +18,13 @@ import (
 var embeddedMigrations embed.FS
 
 // Open opens (creating if necessary) the SQLite database at path and
-// applies any pending migrations.
+// applies any pending migrations. busy_timeout lets concurrent writers
+// (bulk-ingestion workers, the HTTP server) wait for the write lock
+// instead of failing with "database is locked". _txlock=immediate takes the
+// write lock at BEGIN, so a read-then-write transaction waits for it rather
+// than failing immediately when another writer is active.
 func Open(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}

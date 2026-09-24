@@ -51,6 +51,8 @@ func main() {
 		cmdData(os.Args[2:])
 	case "audit":
 		cmdAudit(os.Args[2:])
+	case "source":
+		cmdSource(os.Args[2:])
 	case "version", "--version":
 		fmt.Println(app.Version)
 	case "-h", "--help", "help":
@@ -107,6 +109,7 @@ Usage:
                                    Disable an account and revoke all sessions immediately.
 ` + dataUsage + `
 ` + auditUsage + `
+` + sourceUsage + `
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`
