@@ -161,3 +161,38 @@ func TestScanOnDiskNeverFollowsSymlinksOutOfTheRoot(t *testing.T) {
 		t.Fatalf("symlinks = %d, want 2", summary.Symlinks)
 	}
 }
+
+func TestLocalCorpusReadsWithinRootAndRefusesEscapesAndOversizedFiles(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "doc.md"), []byte("inside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.md"), []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "secret.md"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "secret.md"), filepath.Join(root, "swapped.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	corpus := fsscan.LocalCorpus{Supported: supportedDocs}
+
+	data, err := corpus.ReadFile(root, "doc.md", 1024)
+	if err != nil || string(data) != "inside" {
+		t.Fatalf("ReadFile(doc.md) = %q, %v", data, err)
+	}
+	if _, err := corpus.ReadFile(root, "swapped.md", 1024); err == nil {
+		t.Fatal("ReadFile followed a symlink out of the root")
+	}
+	if _, err := corpus.ReadFile(root, "../secret.md", 1024); err == nil {
+		t.Fatal("ReadFile accepted a path outside the root")
+	}
+	if _, err := corpus.ReadFile(root, "big.md", 5); err == nil || err.Error() != "big.md is 10 bytes, over the 5-byte limit" {
+		t.Fatalf("oversized ReadFile error = %v", err)
+	}
+}
