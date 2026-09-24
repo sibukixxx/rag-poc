@@ -94,7 +94,7 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Full detail (upstream URL, provider body) goes to the log only.
 		log.Printf("chat alias=%q: %v", req.Alias, err)
-		http.Error(w, "upstream provider error", http.StatusBadGateway)
+		writeProviderError(w, err, "upstream provider error")
 		return
 	}
 

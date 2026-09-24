@@ -31,7 +31,7 @@ With `profile: production`, `forgeai doctor` fails when:
 
 - The management UI and `/api/v1` have no built-in production login. Put them behind an authenticating reverse proxy (Cloudflare Access, an OAuth2 proxy, an SSO gateway) inside the customer's boundary.
 - `/runtime/v1` is authenticated per request with deployment-scoped Bearer tokens and may be exposed separately.
-- Outbound provider traffic is governed by Private Mode (`docs/PRIVATE_MODE.md`).
+- Outbound provider traffic is governed by Private Mode (`docs/PRIVATE_MODE.md`) and the sensitive-data policy (`docs/security/SENSITIVE_DATA_POLICY.md`).
 - `CF-Connecting-IP` is trusted as the client address. Only deploy with that header reachable through Cloudflare.
 
 ## What is recorded
@@ -47,7 +47,8 @@ Every event has `id`, `occurred_at`, `action`, `outcome` (`success`, `failure`, 
 | `deployment.create` | Deployment created | `slug`, `knowledge_base_id`, `alias`, `prompt_version`, `top_k`, `rerank` |
 | `document.delete`, `knowledge_base.delete` | deletion attempted | removed counts, or `reason` when refused |
 | `provider.invoke` | LLM or embedding request | `provider`, `model`, `operation`, `endpoint` (origin only), `endpoint_class`, `inputs` for embeddings |
-| `server.start` | `forgeai serve` starts | `version`, `profile`, `privacy_mode`, allowed destinations and provider origins |
+| `egress_policy.apply` | an outbound sensitive-data rule matched | `policy`, `matches` (rule counts), `operation`, `provider`, `model` |
+| `server.start` | `forgeai serve` starts | `version`, `profile`, `privacy_mode`, `outbound_policy`, allowed destinations and provider origins |
 | `secret.set`, `secret.delete` | CLI changed a stored secret | target is the secret name |
 
 Successful Runtime authentications are not recorded one by one. The provider calls they cause are recorded with the runtime token ID as actor.

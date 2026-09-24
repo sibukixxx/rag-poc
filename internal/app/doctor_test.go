@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sibukixxx/rag-poc/internal/config"
+	"github.com/sibukixxx/rag-poc/internal/domain/outbound"
 )
 
 func TestLLMProviderChecksHintDoesNotSuggestUnnamedSecretWhenAPIKeySecretUnset(t *testing.T) {
@@ -112,5 +113,31 @@ func TestProductionProfileChecksPassWhenSingleTenantAndDeclared(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("productionProfileChecks:\nwant %+v\ngot  %+v", want, got)
+	}
+}
+
+func TestOutboundPolicyCheckStatesScopeAndLimits(t *testing.T) {
+	tests := []struct {
+		name    string
+		privacy config.PrivacyConfig
+		want    string
+	}{
+		{"allow", config.PrivacyConfig{}, "policy=allow: retrieved text and questions are sent to providers unchanged"},
+		{"redact with custom rule", config.PrivacyConfig{
+			OutboundPolicy: "redact_known_patterns",
+			SensitiveRules: []outbound.Rule{{Name: "employee_id", Pattern: `EMP-\d{6}`}},
+		}, "policy=redact_known_patterns detectors=email,phone rules=employee_id (deterministic patterns only; other personal data is not detected)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Privacy = tt.privacy
+
+			got := outboundPolicyCheck(cfg)
+
+			if want := (CheckStatus{Name: "Outbound sensitive data", OK: true, Info: tt.want}); got != want {
+				t.Fatalf("outboundPolicyCheck = %+v, want %+v", got, want)
+			}
+		})
 	}
 }

@@ -196,7 +196,7 @@ func (h *DeploymentHandler) RuntimeSearch(w http.ResponseWriter, r *http.Request
 	results, err := h.runtime.SearchDeployment(r.Context(), d, req.Query)
 	if err != nil {
 		log.Printf("runtime: search deployment=%s: %v", d.Slug, err)
-		http.Error(w, "search failed", http.StatusBadGateway)
+		writeProviderError(w, err, "search failed")
 		return
 	}
 	out := make([]searchResultDTO, len(results))
@@ -236,7 +236,7 @@ func (h *DeploymentHandler) RuntimeChat(w http.ResponseWriter, r *http.Request) 
 	result, err := h.runtime.ChatDeployment(r.Context(), d, req.Query)
 	if err != nil {
 		log.Printf("runtime: chat deployment=%s: %v", d.Slug, err)
-		http.Error(w, "chat failed", http.StatusBadGateway)
+		writeProviderError(w, err, "chat failed")
 		return
 	}
 	flusher, ok := w.(http.Flusher)

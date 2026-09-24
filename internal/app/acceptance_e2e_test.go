@@ -182,7 +182,7 @@ func TestAcceptanceE2EMockProviderJourney(t *testing.T) {
 	}
 }
 
-func writeE2EConfig(t *testing.T, providerURL string) string {
+func writeE2EConfig(t *testing.T, providerURL string, privacyExtra ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := fmt.Sprintf(`server:
@@ -197,7 +197,7 @@ security:
   encryption_key_env: FORGEAI_E2E_MASTER_KEY
 privacy:
   mode: local_only
-llm:
+%[3]sllm:
   providers:
     fake:
       type: openai_compatible
@@ -214,7 +214,7 @@ embedding:
     api_key_env: FORGEAI_E2E_PROVIDER_KEY
   model: fake-embed
   dimensions: 64
-`, dir, providerURL)
+`, dir, providerURL, strings.Join(privacyExtra, ""))
 	path := filepath.Join(dir, "forgeai.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)

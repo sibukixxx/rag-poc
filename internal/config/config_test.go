@@ -104,6 +104,8 @@ func TestLoadRejectsInvalidRetentionAndStorageAtRest(t *testing.T) {
 		{"negative trace retention", "retention:\n  traces_days: -1\n", "retention.traces_days must be >= 0 (0 keeps traces), got -1"},
 		{"negative run retention", "retention:\n  evaluation_runs_days: -5\n", "retention.evaluation_runs_days must be >= 0 (0 keeps runs), got -5"},
 		{"unknown storage declaration", "security:\n  storage_at_rest: encrypted\n", `security.storage_at_rest must be "" or "operator_encrypted_volume", got "encrypted"`},
+		{"unknown outbound policy", "privacy:\n  outbound_policy: block\n", `privacy.outbound_policy: outbound policy must be one of allow, deny_sensitive, redact_known_patterns; got "block"`},
+		{"malformed sensitive rule", "privacy:\n  sensitive_rules:\n    - name: acct\n      pattern: 'ACCT-(\\d+'\n", "privacy: sensitive rule \"acct\": invalid pattern: error parsing regexp: missing closing ): `ACCT-(\\d+`"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
