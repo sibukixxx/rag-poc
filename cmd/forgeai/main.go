@@ -20,6 +20,7 @@ import (
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/app"
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/eval"
 	"github.com/sibukixxx/rag-poc/internal/domain/knowledge"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
@@ -48,6 +49,8 @@ func main() {
 		cmdDemoUser(os.Args[2:])
 	case "data":
 		cmdData(os.Args[2:])
+	case "audit":
+		cmdAudit(os.Args[2:])
 	case "version", "--version":
 		fmt.Println(app.Version)
 	case "-h", "--help", "help":
@@ -103,6 +106,7 @@ Usage:
   forgeai demo-user revoke [-config path] <username>
                                    Disable an account and revoke all sessions immediately.
 ` + dataUsage + `
+` + auditUsage + `
 
 Flags:
   -config string   Path to a YAML config file (optional; sane defaults apply)`
@@ -344,16 +348,20 @@ func cmdSecret(args []string) {
 			os.Exit(1)
 		}
 		if err := secrets.Set(context.Background(), name, []byte(value)); err != nil {
+			recordCLIAudit(cliContext(), a, audit.ActionSecretSet, audit.OutcomeFailure, "secret:"+name)
 			fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
 			os.Exit(1)
 		}
+		recordCLIAudit(cliContext(), a, audit.ActionSecretSet, audit.OutcomeSuccess, "secret:"+name)
 		fmt.Printf("forgeai: stored secret %q\n", name)
 
 	case "delete":
 		if err := secrets.Delete(context.Background(), name); err != nil {
+			recordCLIAudit(cliContext(), a, audit.ActionSecretDelete, audit.OutcomeFailure, "secret:"+name)
 			fmt.Fprintf(os.Stderr, "forgeai: %v\n", err)
 			os.Exit(1)
 		}
+		recordCLIAudit(cliContext(), a, audit.ActionSecretDelete, audit.OutcomeSuccess, "secret:"+name)
 		fmt.Printf("forgeai: deleted secret %q\n", name)
 
 	default:

@@ -18,12 +18,19 @@ import (
 type RetentionPolicy struct {
 	TraceDays         int
 	EvaluationRunDays int
+	AuditDays         int
 }
 
 // RetentionReport counts what one retention pass removed.
 type RetentionReport struct {
 	Traces         int `json:"traces"`
 	EvaluationRuns int `json:"evaluation_runs"`
+	AuditEvents    int `json:"audit_events"`
+}
+
+// auditPurger deletes expired audit events (implemented by audit.Store).
+type auditPurger interface {
+	DeleteEventsBefore(ctx context.Context, cutoff time.Time) (int, error)
 }
 
 // DataLifecycleUseCase is the operator path for customer-data deletion and
@@ -33,6 +40,8 @@ type DataLifecycleUseCase struct {
 	policy RetentionPolicy
 	now    func() time.Time
 	Audit  audit.Recorder
+	// AuditRetention applies RetentionPolicy.AuditDays; nil disables it.
+	AuditRetention auditPurger
 }
 
 func NewDataLifecycleUseCase(store lifecycle.Store, policy RetentionPolicy) *DataLifecycleUseCase {
@@ -83,6 +92,13 @@ func (u *DataLifecycleUseCase) ApplyRetention(ctx context.Context) (RetentionRep
 			return report, fmt.Errorf("applying evaluation-run retention: %w", err)
 		}
 		report.EvaluationRuns = n
+	}
+	if u.policy.AuditDays > 0 && u.AuditRetention != nil {
+		n, err := u.AuditRetention.DeleteEventsBefore(ctx, now.AddDate(0, 0, -u.policy.AuditDays))
+		if err != nil {
+			return report, fmt.Errorf("applying audit retention: %w", err)
+		}
+		report.AuditEvents = n
 	}
 	return report, nil
 }

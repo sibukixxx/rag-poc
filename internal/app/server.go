@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/extractor"
+	"github.com/sibukixxx/rag-poc/internal/config"
 	"github.com/sibukixxx/rag-poc/internal/adapter/llmrerank"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
@@ -70,10 +71,14 @@ func (a *App) Handler() (http.Handler, error) {
 	deploymentUC := usecase.NewDeploymentUseCase(deploymentStore, knowledgeStore, promptStore, router)
 	runtimeUC := usecase.NewRuntimeUseCase(deploymentStore, search, ragChat)
 	lifecycleUC := a.DataLifecycle()
+	auditStore := a.Audit()
+	deploymentUC.Audit = auditStore
+	runtimeUC.Audit = auditStore
 
 	demoAuthEnabled := envBool("FORGEAI_DEMO_AUTH_ENABLED")
 	requireCloudflare := envBool("FORGEAI_REQUIRE_CLOUDFLARE_ACCESS")
 	demoAuthUC := usecase.NewDemoAccessUseCase(sqlite.NewDemoAccessStore(a.DB), usecase.DefaultDemoSessionDuration)
+	demoAuthUC.Audit = auditStore
 	demoAuthHandler := forgehandler.NewDemoAuthHandler(demoAuthUC, demoAuthEnabled, requireCloudflare)
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
@@ -92,6 +97,7 @@ func (a *App) Handler() (http.Handler, error) {
 		Deployments: deploymentUC,
 		Runtime:     runtimeUC,
 		Lifecycle:   lifecycleUC,
+		Audit:       auditStore,
 		DemoAuth:    demoAuthHandler,
 	})
 
@@ -104,6 +110,14 @@ func (a *App) Serve() error {
 	handler, err := a.Handler()
 	if err != nil {
 		return err
+	}
+	recordStartup(context.Background(), a.Audit(), a.Config, Version)
+	if a.Config.Profile == config.ProfileProduction {
+		for _, c := range productionProfileChecks(a.Config, envBool("FORGEAI_DEMO_AUTH_ENABLED")) {
+			if !c.OK {
+				log.Printf("WARNING production profile: %s: %s", c.Name, c.Info)
+			}
+		}
 	}
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
@@ -153,8 +167,13 @@ func envBool(name string) bool {
 // DataLifecycle builds the customer-data deletion/retention use case from
 // the configured retention policy. The HTTP API and `forgeai data` share it.
 func (a *App) DataLifecycle() *usecase.DataLifecycleUseCase {
-	return usecase.NewDataLifecycleUseCase(sqlite.NewLifecycleStore(a.DB), usecase.RetentionPolicy{
+	uc := usecase.NewDataLifecycleUseCase(sqlite.NewLifecycleStore(a.DB), usecase.RetentionPolicy{
 		TraceDays:         a.Config.Retention.TraceDays,
 		EvaluationRunDays: a.Config.Retention.EvaluationRunDays,
+		AuditDays:         a.Config.Retention.AuditDays,
 	})
+	auditStore := a.Audit()
+	uc.Audit = auditStore
+	uc.AuditRetention = auditStore
+	return uc
 }

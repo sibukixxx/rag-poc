@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sibukixxx/rag-poc/internal/domain/audit"
 	"github.com/sibukixxx/rag-poc/internal/domain/deployment"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
@@ -171,10 +172,12 @@ func (h *DeploymentHandler) RevokeToken(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *DeploymentHandler) RuntimeSearch(w http.ResponseWriter, r *http.Request) {
-	d, _, ok := h.authorizeRuntime(w, r)
+	d, t, ok := h.authorizeRuntime(w, r)
 	if !ok {
 		return
 	}
+	// Provider calls made for this request are attributed to the token.
+	r = r.WithContext(audit.WithActor(r.Context(), "runtime_token:"+t.ID))
 	var req struct {
 		Query string `json:"query"`
 	}
@@ -208,10 +211,12 @@ func (h *DeploymentHandler) RuntimeSearch(w http.ResponseWriter, r *http.Request
 }
 
 func (h *DeploymentHandler) RuntimeChat(w http.ResponseWriter, r *http.Request) {
-	d, _, ok := h.authorizeRuntime(w, r)
+	d, t, ok := h.authorizeRuntime(w, r)
 	if !ok {
 		return
 	}
+	// Provider calls made for this request are attributed to the token.
+	r = r.WithContext(audit.WithActor(r.Context(), "runtime_token:"+t.ID))
 	var req struct {
 		Query string `json:"query"`
 	}
@@ -275,12 +280,9 @@ func (h *DeploymentHandler) RuntimeChat(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *DeploymentHandler) authorizeRuntime(w http.ResponseWriter, r *http.Request) (*deployment.Deployment, *deployment.Token, bool) {
-	raw, ok := bearerToken(r.Header.Get("Authorization"))
-	if !ok {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return nil, nil, false
-	}
+	// A missing or malformed header still goes through Authenticate (with an
+	// empty token) so the rejection lands in the audit trail.
+	raw, _ := bearerToken(r.Header.Get("Authorization"))
 	d, t, err := h.runtime.Authenticate(r.Context(), chi.URLParam(r, "slug"), raw)
 	if err != nil {
 		w.Header().Set("WWW-Authenticate", "Bearer")

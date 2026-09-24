@@ -50,7 +50,7 @@ func cmdData(args []string) {
 		os.Exit(1)
 	}
 	defer a.Close()
-	ctx := context.Background()
+	ctx := cliContext()
 	uc := a.DataLifecycle()
 
 	var out any

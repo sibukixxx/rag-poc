@@ -71,3 +71,34 @@ func TestDataLifecycleApplyRetentionWithZeroDaysKeepsEverything(t *testing.T) {
 		t.Fatalf("zero-day policy deleted data: report=%+v traceCutoffs=%v runCutoffs=%v", got, store.traceCutoffs, store.runCutoffs)
 	}
 }
+
+type recordingAuditPurger struct{ cutoffs []time.Time }
+
+func (p *recordingAuditPurger) DeleteEventsBefore(_ context.Context, cutoff time.Time) (int, error) {
+	p.cutoffs = append(p.cutoffs, cutoff)
+	return 4, nil
+}
+
+func TestDataLifecycleApplyRetentionPurgesAuditEventsOnlyWithTheirOwnPolicy(t *testing.T) {
+	store := &recordingLifecycleStore{}
+	purger := &recordingAuditPurger{}
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	uc := NewDataLifecycleUseCase(store, RetentionPolicy{AuditDays: 365})
+	uc.AuditRetention = purger
+	uc.now = func() time.Time { return now }
+
+	got, err := uc.ApplyRetention(context.Background())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (RetentionReport{AuditEvents: 4}); got != want {
+		t.Fatalf("retention report = %+v, want %+v", got, want)
+	}
+	if want := []time.Time{now.AddDate(0, 0, -365)}; !reflect.DeepEqual(purger.cutoffs, want) {
+		t.Fatalf("audit cutoffs = %v, want %v", purger.cutoffs, want)
+	}
+	if len(store.traceCutoffs) != 0 || len(store.runCutoffs) != 0 {
+		t.Fatal("audit retention must not delete traces or evaluation runs")
+	}
+}

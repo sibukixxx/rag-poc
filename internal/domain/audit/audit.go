@@ -21,7 +21,6 @@ const (
 	ActionDocumentDelete      = "document.delete"
 	ActionKnowledgeBaseDelete = "knowledge_base.delete"
 	ActionProviderInvoke      = "provider.invoke"
-	ActionEgressPolicyApplied = "egress_policy.apply"
 	ActionServerStart         = "server.start"
 	ActionSecretSet           = "secret.set"
 	ActionSecretDelete        = "secret.delete"
