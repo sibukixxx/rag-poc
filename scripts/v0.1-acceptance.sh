@@ -6,14 +6,37 @@ fail() {
   exit 1
 }
 
+# require_test runs exactly the named tests and fails unless every one of
+# them reports PASS. `go test -run` alone exits 0 when nothing matches, which
+# would let a renamed or deleted gate test pass silently.
+require_test() {
+  local pkg="$1"
+  shift
+  local pattern out
+  pattern="^($(IFS='|'; echo "$*"))\$"
+  out="$(CGO_ENABLED=0 go test -count=1 -v "$pkg" -run "$pattern" 2>&1)" || {
+    echo "$out" >&2
+    fail "gate tests failed in $pkg"
+  }
+  for name in "$@"; do
+    grep -q -- "--- PASS: ${name} " <<<"$out" || fail "gate test ${name} did not run in $pkg"
+  done
+}
+
 echo "== G0: Go vet =="
 go vet ./...
 
 echo "== G0: Go tests =="
 CGO_ENABLED=0 go test ./...
 
+echo "== G1: core E2E (clean DB + mock provider journey) =="
+require_test ./internal/app TestAcceptanceE2EMockProviderJourney
+
+echo "== G6: migration / upgrade from pre-v0.1 schema =="
+require_test ./internal/adapter/sqlite TestMigrateUpgradesPreV01DatabaseWithoutLosingKnowledge
+
 echo "== G2: focused W10 runtime tests =="
-CGO_ENABLED=0 go test ./internal/http/handler -run 'TestRuntimeHTTP(AuthenticationSearchAndRevocation|ChatUsesFrozenPromptAndStreamsCitation)$'
+require_test ./internal/http/handler TestRuntimeHTTPAuthenticationSearchAndRevocation TestRuntimeHTTPChatUsesFrozenPromptAndStreamsCitation
 
 echo "== G3: release packaging =="
 command -v goreleaser >/dev/null 2>&1 || fail "goreleaser is required for W11 acceptance"
