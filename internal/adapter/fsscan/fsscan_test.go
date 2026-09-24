@@ -124,7 +124,7 @@ func TestScanEnumeratesTenThousandFilesWithoutReadingContents(t *testing.T) {
 }
 
 func TestValidateRulesRejectsMalformedPatterns(t *testing.T) {
-	err := fsscan.Rules{Exclude: []string{"[unclosed"}}.Validate()
+	err := fsscan.ValidateRules(fsscan.Rules{Exclude: []string{"[unclosed"}})
 
 	if err == nil || err.Error() != `exclude pattern "[unclosed": syntax error in pattern` {
 		t.Fatalf("error = %v", err)

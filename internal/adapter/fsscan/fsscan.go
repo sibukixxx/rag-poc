@@ -11,19 +11,21 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+
+	"github.com/sibukixxx/rag-poc/internal/domain/bulk"
 )
 
-// Rules are operator include/exclude patterns. A pattern ending in "/" is a
-// directory prefix ("drafts/"); any other pattern uses path.Match syntax and
-// is tried against both the relative path and the base name ("*.tmp").
-// When Include is non-empty, a file must match at least one include.
-type Rules struct {
-	Include []string `json:"include,omitempty"`
-	Exclude []string `json:"exclude,omitempty"`
-}
+// Rules is bulk.Rules; the alias keeps call sites short.
+type Rules = bulk.Rules
 
-// Validate reports malformed patterns up front instead of mid-scan.
-func (r Rules) Validate() error {
+// Entry and Summary are the domain types produced by a scan.
+type (
+	Entry   = bulk.Entry
+	Summary = bulk.ScanSummary
+)
+
+// ValidateRules reports malformed patterns up front instead of mid-scan.
+func ValidateRules(r Rules) error {
 	for kind, patterns := range map[string][]string{"include": r.Include, "exclude": r.Exclude} {
 		for _, p := range patterns {
 			if strings.HasSuffix(p, "/") {
@@ -35,23 +37,6 @@ func (r Rules) Validate() error {
 		}
 	}
 	return nil
-}
-
-// Entry is one discovered file.
-type Entry struct {
-	Path    string
-	Size    int64
-	ModTime int64 // Unix nanoseconds
-}
-
-// Summary counts what a scan found and what it left out, so operators can
-// see that exclusions happened rather than wondering where files went.
-type Summary struct {
-	Files             int `json:"files"`
-	ExcludedSensitive int `json:"excluded_sensitive"`
-	ExcludedByRule    int `json:"excluded_by_rule"`
-	Unsupported       int `json:"unsupported"`
-	Symlinks          int `json:"symlinks"`
 }
 
 // Paths that commonly hold credentials are never ingested, even when an
@@ -98,7 +83,7 @@ func anyMatch(patterns []string, rel string) bool {
 // is supported, not sensitive, and allowed by rules. Symbolic links are
 // never followed. Returning an error from fn stops the scan.
 func Scan(fsys fs.FS, rules Rules, supported func(path string) bool, fn func(Entry) error) (Summary, error) {
-	if err := rules.Validate(); err != nil {
+	if err := ValidateRules(rules); err != nil {
 		return Summary{}, err
 	}
 	var s Summary
