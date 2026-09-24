@@ -21,9 +21,10 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/usecase"
 )
 
-// Serve starts the HTTP server and blocks until it receives SIGINT/SIGTERM,
-// then shuts down gracefully.
-func (a *App) Serve() error {
+// Handler wires every use case against the App's database and returns the
+// complete HTTP surface (management API, runtime API, embedded UI). Serve
+// uses it for the real listener; the acceptance E2E drives it in-process.
+func (a *App) Handler() (http.Handler, error) {
 	// Secrets are optional at boot: a fresh install with no master key set
 	// still serves fine as long as providers resolve their key via
 	// api_key_env (the default). BuildRouter/BuildEmbedder tolerate a nil
@@ -37,7 +38,7 @@ func (a *App) Serve() error {
 
 	tok, err := tokenizer.New()
 	if err != nil {
-		return fmt.Errorf("loading tokenizer: %w", err)
+		return nil, fmt.Errorf("loading tokenizer: %w", err)
 	}
 	knowledgeStore := sqlite.NewKnowledgeStore(a.DB)
 	embedder := BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
@@ -53,7 +54,7 @@ func (a *App) Serve() error {
 
 	promptStore := sqlite.NewPromptStore(a.DB)
 	if err := seedDefaultPrompts(context.Background(), promptStore); err != nil {
-		return fmt.Errorf("seeding default prompts: %w", err)
+		return nil, fmt.Errorf("seeding default prompts: %w", err)
 	}
 	ragChat := usecase.NewRAGChatUseCase(search, router, prices, traces, tok, promptStore)
 
@@ -94,6 +95,17 @@ func (a *App) Serve() error {
 		Runtime:     runtimeUC,
 		DemoAuth:    demoAuthHandler,
 	})
+
+	return handler, nil
+}
+
+// Serve starts the HTTP server and blocks until it receives SIGINT/SIGTERM,
+// then shuts down gracefully.
+func (a *App) Serve() error {
+	handler, err := a.Handler()
+	if err != nil {
+		return err
+	}
 
 	addr := fmt.Sprintf(":%d", a.Config.Server.Port)
 	// No WriteTimeout: SSE chat responses set their own write deadline in
