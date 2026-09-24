@@ -19,6 +19,7 @@ type Config struct {
 	Privacy   PrivacyConfig   `yaml:"privacy"`
 	LLM       LLMConfig       `yaml:"llm"`
 	Embedding EmbeddingConfig `yaml:"embedding"`
+	Retention RetentionConfig `yaml:"retention"`
 }
 
 type ServerConfig struct {
@@ -39,6 +40,22 @@ type SecurityConfig struct {
 	// EncryptionKeyEnv names the environment variable holding the base64
 	// master key used to encrypt secrets at rest (see internal/adapter/crypto).
 	EncryptionKeyEnv string `yaml:"encryption_key_env"`
+	// StorageAtRest records what the operator guarantees about the disk that
+	// holds the database. ForgeAI stores searchable chunk text in plaintext
+	// (FTS needs it), so confidential corpora require an encrypted volume
+	// provided by the infrastructure. "" means nothing has been declared.
+	StorageAtRest string `yaml:"storage_at_rest"`
+}
+
+// StorageAtRestOperatorEncryptedVolume declares that the database lives on
+// a volume encrypted by the host/cloud (FileVault, LUKS, EBS encryption...).
+const StorageAtRestOperatorEncryptedVolume = "operator_encrypted_volume"
+
+// RetentionConfig bounds how long operational artifacts that can quote
+// customer text are kept. 0 keeps them until explicitly deleted.
+type RetentionConfig struct {
+	TraceDays         int `yaml:"traces_days"`
+	EvaluationRunDays int `yaml:"evaluation_runs_days"`
 }
 
 // PrivacyConfig controls outbound provider traffic. external_allowed preserves
@@ -172,7 +189,25 @@ func Load(path string) (Config, error) {
 
 	applyEnvOverrides(&cfg)
 
+	if err := cfg.validate(); err != nil {
+		return Config{}, fmt.Errorf("invalid config %s: %w", path, err)
+	}
 	return cfg, nil
+}
+
+func (c Config) validate() error {
+	if c.Retention.TraceDays < 0 {
+		return fmt.Errorf("retention.traces_days must be >= 0 (0 keeps traces), got %d", c.Retention.TraceDays)
+	}
+	if c.Retention.EvaluationRunDays < 0 {
+		return fmt.Errorf("retention.evaluation_runs_days must be >= 0 (0 keeps runs), got %d", c.Retention.EvaluationRunDays)
+	}
+	switch c.Security.StorageAtRest {
+	case "", StorageAtRestOperatorEncryptedVolume:
+	default:
+		return fmt.Errorf("security.storage_at_rest must be \"\" or %q, got %q", StorageAtRestOperatorEncryptedVolume, c.Security.StorageAtRest)
+	}
+	return nil
 }
 
 func applyEnvOverrides(cfg *Config) {

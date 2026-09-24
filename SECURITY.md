@@ -64,6 +64,15 @@ We will acknowledge receipt within 48 hours and provide updates within 7 days.
 - Cloud metadata endpoints blocked
 - Redirect validation: each hop checked before following
 
+### Customer Data Storage and Deletion
+
+- Extracted chunk text, the full-text index, and evaluation answers are stored **in plaintext** in SQLite; only provider secrets are application-encrypted
+- Put the database on an encrypted volume before ingesting confidential data and declare it with `security.storage_at_rest: operator_encrypted_volume` (`forgeai doctor` reports the declaration; ForgeAI cannot verify the volume)
+- Documents and knowledge bases can be deleted with every derived artifact through the API or `forgeai data`; `forgeai data compact` removes deleted text from the database files
+- Traces and evaluation runs can expire via `retention.traces_days` / `retention.evaluation_runs_days`
+- Deletion does not reach backups, snapshots, or data already sent to an external provider
+- Full inventory: [docs/security/DATA_LIFECYCLE.md](docs/security/DATA_LIFECYCLE.md)
+
 ## Deployment Hardening
 
 - Always deploy customer demos behind Cloudflare Access and enable ForgeAI demo authentication

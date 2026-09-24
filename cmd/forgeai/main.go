@@ -46,6 +46,8 @@ func main() {
 		cmdEval(os.Args[2:])
 	case "demo-user":
 		cmdDemoUser(os.Args[2:])
+	case "data":
+		cmdData(os.Args[2:])
 	case "version", "--version":
 		fmt.Println(app.Version)
 	case "-h", "--help", "help":
@@ -58,7 +60,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `forgeai - Self-hosted AI Application / RAG Platform
+	fmt.Fprintln(os.Stderr, usageText)
+}
+
+var usageText = `forgeai - Self-hosted AI Application / RAG Platform
 
 Usage:
   forgeai version                 Print the packaged ForgeAI version
@@ -97,10 +102,10 @@ Usage:
                                    List demo accounts and expiry status.
   forgeai demo-user revoke [-config path] <username>
                                    Disable an account and revoke all sessions immediately.
+` + dataUsage + `
 
 Flags:
-  -config string   Path to a YAML config file (optional; sane defaults apply)`)
-}
+  -config string   Path to a YAML config file (optional; sane defaults apply)`
 
 func cmdDemoUser(args []string) {
 	if len(args) == 0 {

@@ -74,3 +74,49 @@ func TestEnsureDirsCreatesDataDirectories(t *testing.T) {
 		t.Errorf("expected storage dir to exist: %v", err)
 	}
 }
+
+func TestLoadParsesRetentionAndStorageAtRest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "forgeai.yaml")
+	yaml := "retention:\n  traces_days: 30\n  evaluation_runs_days: 90\nsecurity:\n  storage_at_rest: operator_encrypted_volume\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retention != (config.RetentionConfig{TraceDays: 30, EvaluationRunDays: 90}) {
+		t.Fatalf("retention = %+v", cfg.Retention)
+	}
+	if cfg.Security.StorageAtRest != config.StorageAtRestOperatorEncryptedVolume {
+		t.Fatalf("storage_at_rest = %q", cfg.Security.StorageAtRest)
+	}
+}
+
+func TestLoadRejectsInvalidRetentionAndStorageAtRest(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"negative trace retention", "retention:\n  traces_days: -1\n", "retention.traces_days must be >= 0 (0 keeps traces), got -1"},
+		{"negative run retention", "retention:\n  evaluation_runs_days: -5\n", "retention.evaluation_runs_days must be >= 0 (0 keeps runs), got -5"},
+		{"unknown storage declaration", "security:\n  storage_at_rest: encrypted\n", `security.storage_at_rest must be "" or "operator_encrypted_volume", got "encrypted"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "forgeai.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := config.Load(path)
+
+			if err == nil || err.Error() != "invalid config "+path+": "+tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

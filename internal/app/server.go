@@ -72,6 +72,7 @@ func (a *App) Handler() (http.Handler, error) {
 	deploymentStore := sqlite.NewDeploymentStore(a.DB)
 	deploymentUC := usecase.NewDeploymentUseCase(deploymentStore, knowledgeStore, promptStore, router)
 	runtimeUC := usecase.NewRuntimeUseCase(deploymentStore, search, ragChat)
+	lifecycleUC := a.DataLifecycle()
 
 	demoAuthEnabled := envBool("FORGEAI_DEMO_AUTH_ENABLED")
 	requireCloudflare := envBool("FORGEAI_REQUIRE_CLOUDFLARE_ACCESS")
@@ -93,6 +94,7 @@ func (a *App) Handler() (http.Handler, error) {
 		Compare:     compareUC,
 		Deployments: deploymentUC,
 		Runtime:     runtimeUC,
+		Lifecycle:   lifecycleUC,
 		DemoAuth:    demoAuthHandler,
 	})
 
@@ -149,4 +151,13 @@ func envBool(name string) bool {
 	default:
 		return false
 	}
+}
+
+// DataLifecycle builds the customer-data deletion/retention use case from
+// the configured retention policy. The HTTP API and `forgeai data` share it.
+func (a *App) DataLifecycle() *usecase.DataLifecycleUseCase {
+	return usecase.NewDataLifecycleUseCase(sqlite.NewLifecycleStore(a.DB), usecase.RetentionPolicy{
+		TraceDays:         a.Config.Retention.TraceDays,
+		EvaluationRunDays: a.Config.Retention.EvaluationRunDays,
+	})
 }

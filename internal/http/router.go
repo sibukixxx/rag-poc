@@ -52,6 +52,7 @@ type Deps struct {
 	Compare     *usecase.CompareUseCase
 	Deployments *usecase.DeploymentUseCase
 	Runtime     *usecase.RuntimeUseCase
+	Lifecycle   *usecase.DataLifecycleUseCase
 	DemoAuth    *handler.DemoAuthHandler
 }
 
@@ -71,6 +72,7 @@ func NewRouter(deps Deps) http.Handler {
 	traces := handler.NewTraceHandler(deps.Traces)
 	evaluations := handler.NewEvalHandler(deps.Datasets, deps.Eval, deps.Compare)
 	deployments := handler.NewDeploymentHandler(deps.Deployments, deps.Runtime)
+	lifecycleHandler := handler.NewLifecycleHandler(deps.Lifecycle)
 	demoAuth := deps.DemoAuth
 
 	if demoAuth != nil {
@@ -98,6 +100,10 @@ func NewRouter(deps Deps) http.Handler {
 			r.Get("/knowledge-bases", kb.ListKnowledgeBases)
 			r.With(limitBody(maxUploadBody)).Post("/knowledge-bases/{id}/documents", kb.UploadDocument)
 			r.Get("/knowledge-bases/{id}/documents", kb.ListDocuments)
+			// #23 customer-data deletion. Deleting a knowledge base that
+			// serves a Deployment requires include_deployments=true.
+			r.Delete("/knowledge-bases/{id}", lifecycleHandler.DeleteKnowledgeBase)
+			r.Delete("/knowledge-bases/{id}/documents/{docID}", lifecycleHandler.DeleteDocument)
 			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/search", kb.Search)
 			r.With(limitBody(maxJSONBody)).Post("/knowledge-bases/{id}/chat", kb.Chat)
 			r.With(limitBody(maxJSONBody)).Post("/prompts", prompts.Create)
