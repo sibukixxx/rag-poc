@@ -124,7 +124,7 @@ func setupRuntimeHTTPTest(t *testing.T) (*DeploymentHandler, *sqlite.DeploymentS
 	if err != nil {
 		t.Fatal(err)
 	}
-	rag := usecase.NewRAGChatUseCase(search, router, llm.PriceTable{}, nil, tokz, nil)
+	rag := usecase.NewRAGChatUseCase(search, router, llm.PriceTable{}, sqlite.NewTraceStore(db), tokz, nil)
 	runtimeUC := usecase.NewRuntimeUseCase(store, search, rag)
 	h := NewDeploymentHandler(nil, runtimeUC)
 
@@ -212,7 +212,8 @@ func TestRuntimeHTTPChatUsesFrozenPromptAndStreamsCitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rag := usecase.NewRAGChatUseCase(search, router, llm.PriceTable{}, nil, tokz, nil)
+	traces := sqlite.NewTraceStore(db)
+	rag := usecase.NewRAGChatUseCase(search, router, llm.PriceTable{}, traces, tokz, nil)
 	h := NewDeploymentHandler(nil, usecase.NewRuntimeUseCase(store, search, rag))
 
 	r := chi.NewRouter()
@@ -232,5 +233,13 @@ func TestRuntimeHTTPChatUsesFrozenPromptAndStreamsCitation(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "answer [1]") || !strings.Contains(body, "policy.md") || !strings.Contains(body, `"done":true`) {
 		t.Fatalf("unexpected SSE body: %s", body)
+	}
+
+	recorded, err := traces.ListTraces(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recorded) != 1 || !strings.HasPrefix(recorded[0].Name, "rag_chat:") {
+		t.Fatalf("runtime chat traces = %+v, want one rag_chat trace", recorded)
 	}
 }
