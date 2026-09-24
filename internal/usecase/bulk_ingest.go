@@ -341,6 +341,17 @@ func (u *BulkIngestUseCase) Run(ctx context.Context, jobID string) (*bulk.Job, e
 	if err := u.Jobs.SetJobStatus(ctx, job.ID, bulk.JobRunning, "", u.Now()); err != nil {
 		return nil, err
 	}
+	// Files still marked processing were interrupted. Remove any half-built
+	// document they left before requeueing them, so no duplicate remains.
+	orphans, err := u.Jobs.InterruptedDocuments(ctx, job.ID, conn.KnowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range orphans {
+		if err := u.Sources.DeleteDocument(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	if err := u.Jobs.ResetProcessing(ctx, job.ID); err != nil {
 		return nil, err
 	}

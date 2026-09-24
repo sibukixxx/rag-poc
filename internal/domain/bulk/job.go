@@ -94,6 +94,10 @@ type Store interface {
 	AddItems(ctx context.Context, jobID string, items []Item) error
 	// ResetProcessing returns files interrupted mid-processing to pending.
 	ResetProcessing(ctx context.Context, jobID string) error
+	// InterruptedDocuments lists unfinished (pending) documents that a file
+	// still marked processing left behind in the knowledge base when the
+	// previous process stopped mid-ingest, and that no source item maps.
+	InterruptedDocuments(ctx context.Context, jobID, knowledgeBaseID string) ([]string, error)
 	// ClaimPending atomically marks up to limit pending files as processing.
 	ClaimPending(ctx context.Context, jobID string, limit int) ([]Item, error)
 	FinishItem(ctx context.Context, jobID, path string, status ItemStatus, attempts int, errMsg string) error

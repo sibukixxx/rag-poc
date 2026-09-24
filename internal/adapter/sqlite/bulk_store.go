@@ -184,6 +184,27 @@ func (s *BulkStore) ResetProcessing(ctx context.Context, jobID string) error {
 	return err
 }
 
+func (s *BulkStore) InterruptedDocuments(ctx context.Context, jobID, knowledgeBaseID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT d.id FROM documents d
+		JOIN ingestion_job_items i ON i.path = d.filename AND i.job_id = ? AND i.status = ?
+		WHERE d.knowledge_base_id = ? AND d.status = 'pending'
+		  AND d.id NOT IN (SELECT document_id FROM source_items WHERE document_id IS NOT NULL)`,
+		jobID, string(bulk.ItemProcessing), knowledgeBaseID)
+	if err != nil {
+		return nil, fmt.Errorf("listing interrupted documents: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *BulkStore) ClaimPending(ctx context.Context, jobID string, limit int) ([]bulk.Item, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

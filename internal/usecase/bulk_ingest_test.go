@@ -344,3 +344,50 @@ func TestBulkIngestCreateConnectionRejectsRootsOutsideTheAllowlist(t *testing.T)
 		t.Fatalf("error without allowlist = %v", err)
 	}
 }
+
+// crashingIngester creates the document row the way IngestFile does and
+// then "dies" (cancels the run) before the file is mapped, like a process
+// killed mid-file.
+type crashingIngester struct {
+	store  knowledge.Store
+	cancel context.CancelFunc
+	next   usecase.FileIngester
+	armed  bool
+}
+
+func (c *crashingIngester) IngestFile(ctx context.Context, kbID, filename, mime string, data []byte) (*knowledge.Document, error) {
+	if c.armed {
+		c.armed = false
+		_ = c.store.CreateDocument(ctx, knowledge.Document{ID: "orphan-" + filename, KnowledgeBaseID: kbID, Filename: filename, Status: knowledge.DocumentStatusPending})
+		c.cancel()
+		return nil, ctx.Err()
+	}
+	return c.next.IngestFile(ctx, kbID, filename, mime, data)
+}
+
+func TestBulkIngestResumeRemovesDocumentsLeftByAFileInterruptedMidIngest(t *testing.T) {
+	f := newBulkIngestFixture(t)
+	f.uc.Workers = 1
+	connID := f.connect(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	crash := &crashingIngester{store: sqlite.NewKnowledgeStore(f.db), cancel: cancel, next: f.ingester, armed: true}
+	f.uc.Ingester = crash
+	job, err := f.uc.StartJob(ctx, connID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.uc.Run(ctx, job.ID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v, want context.Canceled", err)
+	}
+
+	if _, err := f.uc.Run(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := countTable(t, f.db, `SELECT COUNT(1) FROM documents`); n != 3 {
+		t.Fatalf("documents = %d, want 3 (the interrupted file's orphan removed)", n)
+	}
+	if n := countTable(t, f.db, `SELECT COUNT(1) FROM documents WHERE status != 'ready'`); n != 0 {
+		t.Fatalf("%d unfinished documents left", n)
+	}
+}
