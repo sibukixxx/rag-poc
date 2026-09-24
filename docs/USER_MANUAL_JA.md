@@ -94,7 +94,23 @@ export FORGEAI_MASTER_KEY='initで表示された値'
 export FORGEAI_OPENAI_API_KEY='利用するAPIキー'
 ```
 
-APIキーをSQLiteへ暗号化保存する場合は、マスターキーを設定したうえで次を実行します。
+APIキーをSQLiteへ暗号化保存する場合は、まず `forgeai.yaml` のプロバイダ設定で保存名を指定します。保存名を参照していないプロバイダは、保存したキーを使いません。
+
+```yaml
+llm:
+  providers:
+    default:
+      type: openai_compatible
+      base_url: https://api.openai.com/v1
+      api_key_secret: openai
+embedding:
+  provider:
+    type: openai_compatible
+    base_url: https://api.openai.com/v1
+    api_key_secret: openai
+```
+
+マスターキーを設定したうえで次を実行します。
 
 ```bash
 printf '%s' "$FORGEAI_OPENAI_API_KEY" | ./dist/forgeai secret set openai
@@ -417,7 +433,11 @@ APIキーを設定してビルドした後、次を実行します。
 | 起動 | `./dist/forgeai serve` |
 | APIキー保存 | `./dist/forgeai secret set openai` |
 | APIキー削除 | `./dist/forgeai secret delete openai` |
-| 文書一括登録 | `./dist/forgeai ingest -kb <slug> <directory>` |
+| 文書一括登録（直下のみ） | `./dist/forgeai ingest -kb <slug> <directory>` |
+| フォルダを再帰的に同期 | `./dist/forgeai source add-fs -kb <slug> <root>` → `./dist/forgeai source sync <connection-id>` |
+| 文書・ナレッジベースの削除 | `./dist/forgeai data delete-document <id>` / `./dist/forgeai data delete-kb -kb <slug>` |
+| 保持期間の適用 | `./dist/forgeai data retention` |
+| 監査ログ | `./dist/forgeai audit list` |
 | 正解データ登録 | `./dist/forgeai eval import -kb <slug> <dataset> <file>` |
 | 検索評価 | `./dist/forgeai eval run <dataset>` |
 | 回答品質も評価 | `./dist/forgeai eval run -judge <dataset>` |

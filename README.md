@@ -11,8 +11,30 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - 🔍 Hybrid search with semantic embeddings (OpenAI-compatible models)
 - 🎯 Golden Dataset evaluation — measure retrieval + LLM generation quality
 - 📊 Cost & latency tracking — see token usage and API costs per request
-- 🚀 Deploy chat APIs — secure, rate-limited endpoints for your applications
-- 🔐 Encrypted secret storage — AES-GCM with per-secret authentication
+- 📁 Folder / NAS sources — resumable bulk ingestion of whole directory trees, run by the server in the background
+- 🚀 Deploy chat APIs — immutable Deployment snapshots + Bearer-token Runtime API
+- 🔒 Private Mode and outbound sensitive-data policy — block unapproved destinations, block or redact known identifier formats
+- 🧾 Security audit trail, data deletion/retention, single-tenant production profile
+- 🔐 Encrypted secret storage — AES-GCM for provider keys and source OAuth grants
+
+## Status
+
+| Area | State | Where |
+|------|-------|-------|
+| Ingest, Hybrid Search, cited RAG chat, Prompt Registry, Traces | ✅ | W1–W6 |
+| Golden Dataset, retrieval metrics, LLM Judge, Before/After comparison | ✅ | W7–W9, [docs/EVALUATION.md](docs/EVALUATION.md) |
+| Deployment snapshots + Runtime API (`/runtime/v1`) | ✅ | W10, [docs/RUNTIME_API.md](docs/RUNTIME_API.md) |
+| Release packaging (GoReleaser, 4 targets, Docker) | ✅ | W11, [docs/RELEASE.md](docs/RELEASE.md) |
+| Fail-closed v0.1 acceptance gate | ✅ script, ⏳ waiting on dogfooding | W12, [docs/V0.1_ACCEPTANCE.md](docs/V0.1_ACCEPTANCE.md) |
+| Security & Privacy gate: Private Mode, deletion/retention, audit, outbound policy | ✅ | [#21](https://github.com/sibukixxx/rag-poc/issues/21), [docs/security/V0.1_SECURITY_EVIDENCE.md](docs/security/V0.1_SECURITY_EVIDENCE.md) |
+| Folder / NAS bulk ingestion | ✅ | [#30](https://github.com/sibukixxx/rag-poc/issues/30), [docs/source-connectors.md](docs/source-connectors.md) |
+| Web source control plane (OAuth, scopes, sync status) | ✅ framework, no OAuth connector bundled yet | [#31](https://github.com/sibukixxx/rag-poc/issues/31) |
+| TechVit dogfooding report | ⏳ needs a real provider and real questions | [#26](https://github.com/sibukixxx/rag-poc/issues/26) |
+| HTTP feed, Office files, Drive, M365, Atlassian, GitHub/Notion connectors | 📋 planned | [#29](https://github.com/sibukixxx/rag-poc/issues/29) |
+
+`v0.1.0` is tagged only after `./scripts/v0.1-acceptance.sh` passes, which requires the dogfooding report.
+
+Open work is tracked in [GitHub Issues](https://github.com/sibukixxx/rag-poc/issues) with `P0`/`P1`/`P2` and `area/*` labels; release-blocking items sit in the [v0.1 milestone](https://github.com/sibukixxx/rag-poc/milestone/1).
 
 ## Documentation
 
@@ -20,9 +42,17 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - [docs/V0.1_SPEC.md](docs/V0.1_SPEC.md) — Complete v0.1 specification (scope, API, schema, acceptance criteria)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 12-week development roadmap
 - [docs/DESIGN_REVIEW.md](docs/DESIGN_REVIEW.md) — Design decisions, trade-offs, risk assessment
-- [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Free deployment guide (Cloudflare Tunnel + Workers)
-- [docs/source-connectors.md](docs/source-connectors.md) — Provider-neutral external source synchronization architecture
+- [docs/EVALUATION.md](docs/EVALUATION.md) — Golden Dataset format, metric definitions, evaluation run semantics
+- [docs/PRIVATE_MODE.md](docs/PRIVATE_MODE.md) — `local_only` / `external_allowed` provider egress policy and configuration
+- [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) — Free deployment guide (Cloudflare Tunnel + Access)
+- [docs/source-connectors.md](docs/source-connectors.md) — Source sync architecture, folder/NAS ingestion, OAuth control plane
+- [docs/RUNTIME_API.md](docs/RUNTIME_API.md) — Deployments, runtime tokens, runtime search/chat
+- [docs/RELEASE.md](docs/RELEASE.md) — Release packaging and clean-machine smoke test
+- [docs/V0.1_ACCEPTANCE.md](docs/V0.1_ACCEPTANCE.md) — v0.1 acceptance gates
+- [docs/DOGFOODING.md](docs/DOGFOODING.md) — TechVit dogfooding runbook
+- [docs/security/](docs/security/) — Security evidence, data lifecycle, audit trail, sensitive-data policy
 - [docs/demo-access.md](docs/demo-access.md) — 問い合わせ後に期限付き個別デモを発行する運用
+- [SECURITY.md](SECURITY.md) — Security policy, implemented controls, and known limitations
 
 ## Installation
 
@@ -60,7 +90,16 @@ export FORGEAI_MASTER_KEY=<value_from_init>
 export FORGEAI_OPENAI_API_KEY=sk-...
 ```
 
-Or use the interactive prompt to store securely in the database:
+Or store the key encrypted in the database. Name the secret in the provider config first, because a stored secret is only used when a provider references it:
+
+```yaml
+llm:
+  providers:
+    default:
+      type: openai_compatible
+      base_url: https://api.openai.com/v1
+      api_key_secret: openai
+```
 
 ```bash
 echo "sk-..." | ./dist/forgeai secret set openai
@@ -88,13 +127,30 @@ The UI provides five main features:
 
 **Chat** — Select an LLM alias (cheap / normal / judge) and chat interactively. Each reply shows token counts and API costs, recorded as Traces in SQLite. Optionally select a Knowledge Base to enable Hybrid Search retrieval with inline citations (`[1]`, `[2]`, etc.).
 
-**Knowledge** — Create knowledge bases and upload files (PDF, TXT, MD, HTML, CSV, JSON). Documents are automatically chunked, normalized, and embedded. Identical re-uploads reuse cached embeddings (zero API cost). A **Search** sub-tab runs Hybrid Search (semantic + keyword, merged by RRF) with optional LLM reranking.
+**Knowledge** — Create knowledge bases and upload files (PDF, TXT, MD, HTML, CSV, JSON). The **Data connections** sub-tab registers folders under `sources.filesystem.allowed_roots`, runs server-side sync jobs, and shows progress, failures, and authorization state. Documents are automatically chunked, normalized, and embedded. Identical re-uploads reuse cached embeddings (zero API cost). A **Search** sub-tab runs Hybrid Search (semantic + keyword, merged by RRF) with optional LLM reranking.
 
 **Prompts** — Edit the RAG chat's system prompt without code changes. Write a version, diff it against the previous one, and activate it — the very next chat call uses it, no redeploy needed.
 
 **Eval** — Create a Golden Dataset (human-verified test set) scoped to a knowledge base, import cases (JSON or CSV with `query` + `expected_filenames`), and run them through Hybrid Search. Each run reports Recall@K, Precision@K, MRR, and Hit Rate. Enable **LLM Judge** to grade each answer for Correctness / Groundedness / Relevance. Compare two finished runs as Before/After, analyzing quality/latency/cost with a winner rationale, and export as Markdown. See [examples/](examples/) for a 50-question sample.
 
 **Traces** — View every chat, search, and ingest call with detailed spans (type, latency, tokens, cost, status). Debug prompt and config changes by comparing traces side-by-side.
+
+### CLI
+
+Everything above is also scriptable without the browser:
+
+```bash
+forgeai init                          # generate forgeai.yaml + master key
+forgeai secret set <name>             # store a provider key (value read from stdin)
+forgeai doctor                        # check DB, master key, privacy mode, provider destinations
+forgeai ingest -kb <slug> <dir>       # ingest files directly under <dir> (KB created if missing)
+forgeai eval import|run|list|compare  # Golden Dataset import, evaluation run, Before/After compare
+forgeai demo-user create|list|revoke  # expiring demo accounts (docs/demo-access.md)
+forgeai source add-fs|sync|job|pause|resume  # folder / NAS bulk ingestion
+forgeai data delete-kb|delete-document|retention|compact  # customer-data deletion and retention
+forgeai audit list                    # security audit trail
+forgeai serve                         # start the HTTP server + embedded UI
+```
 
 ## Development
 
@@ -149,7 +205,7 @@ cmd/forgeai        ← Main entry point (bootstrap, CLI, API server)
 internal/app       ← Wiring, HTTP server setup
   ↓
 internal/http      ← Chi router, API handlers, SSE
-internal/usecase   ← Business logic (chat, ingest)
+internal/usecase   ← Business logic (chat, ingest, search, RAG, evaluate, judge, compare, source sync)
   ↓
 internal/domain    ← Interfaces only (no external deps)
   ↓
@@ -157,7 +213,12 @@ internal/adapter   ← Implementations
   ├─ sqlite        ← Database & embedded migrations
   ├─ crypto        ← AES-GCM secret storage
   ├─ openaicompat  ← LLM & embedding client
-  └─ extractor     ← PDF, HTML, text parsing
+  ├─ egress        ← Private Mode destination policy on the provider transport
+  ├─ extractor     ← PDF, HTML, CSV, JSON, text parsing
+  ├─ tokenizer     ← Token counting / chunking
+  ├─ vecmem/vecenc ← Embedded brute-force vector index & encoding
+  ├─ llmrerank     ← Optional LLM listwise reranker
+  └─ source        ← Source connector registry
 ```
 
 See [AGENTS.md](AGENTS.md) for detailed design decisions and conventions.
@@ -198,8 +259,12 @@ ForgeAI は、**Go 単一バイナリで動作する自ホスト型 RAG / AI ア
 - 🔍 ハイブリッド検索（セマンティック + BM25）で日本語対応
 - 🎯 Golden Dataset による検索・生成品質の自動評価
 - 📊 トークン数と API コストの追跡
-- 🚀 認証・レート制限付きチャット API のデプロイ
+- 📁 フォルダ / NAS の一括取り込み（サーバー側で再開可能なジョブとして実行）
+- 🧾 監査ログ、データ削除と保持期間、単一テナントの本番プロファイル
+- 🛡️ 外部プロバイダへの送信時にメール・電話番号などの既知の形式を遮断またはマスク
+- 🔒 Private Mode（`local_only`）— 承認外の LLM / 埋め込み先への送信を送信前に遮断
 - 🔐 AES-GCM による秘密情報の暗号化保存
+- 🚀 認証・レート制限付きチャット API のデプロイ
 
 ### クイックスタート
 
