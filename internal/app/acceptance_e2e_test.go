@@ -19,7 +19,8 @@ import (
 // docs/V0.1_ACCEPTANCE.md: a clean database driven through the real HTTP
 // surface — ingest, hybrid search, cited RAG chat, Golden Dataset with
 // judge, Before/After compare, Deployment, Runtime search/chat, prompt
-// snapshot immutability, restart persistence, and token revocation.
+// snapshot immutability, restart persistence, token revocation, and
+// customer-data deletion.
 // Only the model provider is replaced (by a loopback fake), and Private
 // Mode is on, so the run also proves no other destination is needed.
 func TestAcceptanceE2EMockProviderJourney(t *testing.T) {
@@ -127,6 +128,18 @@ func TestAcceptanceE2EMockProviderJourney(t *testing.T) {
 	srv.do(t, http.MethodDelete, "/api/v1/deployments/"+dep.ID+"/tokens/"+tok.ID, "", "", http.StatusNoContent)
 	srv.runtimeSearch(t, "acceptance-app", tok.Token, http.StatusUnauthorized)
 	srv.do(t, http.MethodPost, "/runtime/v1/apps/acceptance-app/chat", `{"query":"refund window?"}`, tok.Token, http.StatusUnauthorized)
+
+	// 9. Customer-data deletion (#23): a KB serving a Deployment is only
+	// deleted with explicit opt-in, after which its content is unsearchable.
+	srv.do(t, http.MethodDelete, "/api/v1/knowledge-bases/"+kb.ID, "", "", http.StatusConflict)
+	srv.do(t, http.MethodDelete, "/api/v1/knowledge-bases/"+kb.ID+"?include_deployments=true", "", "", http.StatusOK)
+	var remaining []struct {
+		ID string `json:"id"`
+	}
+	srv.getJSON(t, "/api/v1/knowledge-bases", http.StatusOK, &remaining)
+	if len(remaining) != 0 {
+		t.Fatalf("knowledge bases after deletion = %+v, want none", remaining)
+	}
 
 	if provider.requestCount() == 0 {
 		t.Fatal("fake provider was never called; the journey did not exercise the provider path")
