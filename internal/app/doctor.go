@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/crypto"
 	"github.com/sibukixxx/rag-poc/internal/adapter/egress"
@@ -119,8 +120,7 @@ func embeddingCheck(cfg config.Config, secrets secret.Store) CheckStatus {
 	}
 	return CheckStatus{
 		Name: "Embedding model", OK: false,
-		Info: fmt.Sprintf("%s: no API key (set %s or `forgeai secret set %s`)",
-			cfg.Embedding.Model, cfg.Embedding.Provider.APIKeyEnv, cfg.Embedding.Provider.APIKeySecret),
+		Info: fmt.Sprintf("%s: %s", cfg.Embedding.Model, missingKeyHint(cfg.Embedding.Provider)),
 	}
 }
 
@@ -150,10 +150,26 @@ func llmProviderChecks(cfg config.Config, secrets secret.Store) []CheckStatus {
 		} else {
 			checks = append(checks, CheckStatus{
 				Name: name, OK: false,
-				Info: fmt.Sprintf("%s -> %s: no API key (set %s or `forgeai secret set %s`)", target.Provider, target.Model, provider.APIKeyEnv, provider.APIKeySecret),
+				Info: fmt.Sprintf("%s -> %s: %s", target.Provider, target.Model, missingKeyHint(provider)),
 			})
 		}
 	}
 
 	return checks
+}
+
+// missingKeyHint tells the operator how to supply a provider key. A stored
+// secret is only consulted when the provider names it via api_key_secret,
+// so suggesting `forgeai secret set` without that name would be a dead end.
+func missingKeyHint(p config.ProviderConfig) string {
+	var ways []string
+	if p.APIKeyEnv != "" {
+		ways = append(ways, "export "+p.APIKeyEnv)
+	}
+	if p.APIKeySecret != "" {
+		ways = append(ways, fmt.Sprintf("`forgeai secret set %s`", p.APIKeySecret))
+	} else {
+		ways = append(ways, "set api_key_secret: <name> in the provider config and run `forgeai secret set <name>`")
+	}
+	return "no API key (" + strings.Join(ways, " or ") + ")"
 }

@@ -46,6 +46,8 @@ func main() {
 		cmdEval(os.Args[2:])
 	case "demo-user":
 		cmdDemoUser(os.Args[2:])
+	case "version", "--version":
+		fmt.Println(app.Version)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -59,6 +61,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `forgeai - Self-hosted AI Application / RAG Platform
 
 Usage:
+  forgeai version                 Print the packaged ForgeAI version
   forgeai serve  [-config path]   Start the server (default port 8080)
   forgeai doctor [-config path]   Check environment and configuration
   forgeai init   [-config path]   Generate a master key and starter config
