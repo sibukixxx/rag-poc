@@ -7,7 +7,6 @@ package fsscan
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"path"
 	"strings"
@@ -25,19 +24,7 @@ type (
 )
 
 // ValidateRules reports malformed patterns up front instead of mid-scan.
-func ValidateRules(r Rules) error {
-	for kind, patterns := range map[string][]string{"include": r.Include, "exclude": r.Exclude} {
-		for _, p := range patterns {
-			if strings.HasSuffix(p, "/") {
-				continue
-			}
-			if _, err := path.Match(p, ""); err != nil {
-				return fmt.Errorf("%s pattern %q: %w", kind, p, err)
-			}
-		}
-	}
-	return nil
-}
+func ValidateRules(r Rules) error { return r.Validate() }
 
 // Paths that commonly hold credentials are never ingested, even when an
 // operator's include pattern would match them.

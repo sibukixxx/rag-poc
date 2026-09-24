@@ -1,6 +1,12 @@
 // Package bulk models resumable bulk ingestion of a filesystem corpus (#30).
 package bulk
 
+import (
+	"fmt"
+	"path"
+	"strings"
+)
+
 // Rules are operator include/exclude patterns. A pattern ending in "/" is a
 // directory prefix ("drafts/"); any other pattern uses path.Match syntax and
 // is tried against both the relative path and the base name ("*.tmp").
@@ -26,4 +32,22 @@ type ScanSummary struct {
 	ExcludedByRule    int `json:"excluded_by_rule"`
 	Unsupported       int `json:"unsupported"`
 	Symlinks          int `json:"symlinks"`
+}
+
+// Validate reports malformed patterns up front instead of mid-scan.
+func (r Rules) Validate() error {
+	for _, set := range []struct {
+		kind     string
+		patterns []string
+	}{{"include", r.Include}, {"exclude", r.Exclude}} {
+		for _, p := range set.patterns {
+			if strings.HasSuffix(p, "/") {
+				continue
+			}
+			if _, err := path.Match(p, ""); err != nil {
+				return fmt.Errorf("%s pattern %q: %w", set.kind, p, err)
+			}
+		}
+	}
+	return nil
 }
