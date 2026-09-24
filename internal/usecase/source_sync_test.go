@@ -125,12 +125,14 @@ func (r fakeRegistry) Get(provider string) (source.Connector, bool) {
 }
 
 type fakeTextIngester struct {
-	calls  int
-	failOn int
+	calls    int
+	failOn   int
+	lastText string
 }
 
 func (i *fakeTextIngester) IngestText(_ context.Context, kbID, title, mimeType, text string) (*knowledge.Document, error) {
 	i.calls++
+	i.lastText = text
 	if i.failOn > 0 && i.calls == i.failOn {
 		return nil, errors.New("embedding failed")
 	}
@@ -228,5 +230,43 @@ func TestSourceSyncDoesNotAdvancePartialBatchCursorOnFailure(t *testing.T) {
 	storedJob, _ := store.GetJob(context.Background(), job.ID)
 	if storedJob.Status != source.JobStatusFailed || storedJob.FinishedAt == nil {
 		t.Fatalf("failed job was not persisted: %+v", storedJob)
+	}
+}
+
+type tokenCredentials struct{ token string }
+
+func (c tokenCredentials) AccessToken(context.Context) (string, error) { return c.token, nil }
+
+// bearerConnector returns one document whose body proves which token it
+// was given; it refuses the credential-less Pull path.
+type bearerConnector struct{}
+
+func (bearerConnector) Provider() string { return "bearer_feed" }
+func (bearerConnector) Pull(context.Context, source.Connection, string) (source.Batch, error) {
+	return source.Batch{}, fmt.Errorf("bearer_feed requires credentials")
+}
+func (bearerConnector) PullWithCredentials(ctx context.Context, _ source.Connection, _ string, creds source.Credentials) (source.Batch, error) {
+	tok, err := creds.AccessToken(ctx)
+	if err != nil {
+		return source.Batch{}, err
+	}
+	return source.Batch{Documents: []source.Document{{ExternalID: "x", Title: "X", Body: "fetched with " + tok}}}, nil
+}
+
+func TestSourceSyncGivesCredentialedConnectorsTheirAccessToken(t *testing.T) {
+	store := newFakeSourceStore()
+	store.connection = source.Connection{ID: "conn", KnowledgeBaseID: "kb", Provider: "bearer_feed", Enabled: true, AuthState: source.AuthAuthorized}
+	ingester := &fakeTextIngester{}
+	uc := usecase.NewSourceSyncUseCase(store, fakeRegistry{bearerConnector{}}, ingester)
+
+	_, withoutCreds := uc.Sync(context.Background(), "conn")
+	uc.Credentials = func(source.Connection) source.Credentials { return tokenCredentials{token: "tok-123"} }
+	job, err := uc.Sync(context.Background(), "conn")
+
+	if withoutCreds == nil || withoutCreds.Error() != "source provider \"bearer_feed\" needs credentials but none are configured" {
+		t.Fatalf("sync without credentials error = %v", withoutCreds)
+	}
+	if err != nil || job.Created != 1 || ingester.lastText != "fetched with tok-123" {
+		t.Fatalf("job = %+v err = %v last text = %q", job, err, ingester.lastText)
 	}
 }

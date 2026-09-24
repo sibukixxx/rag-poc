@@ -29,6 +29,9 @@ type SourceSyncUseCase struct {
 	Now        func() time.Time
 	NewID      func() string
 	MaxBatches int
+	// Credentials supplies access tokens to CredentialedConnectors; the
+	// control plane wires it to the Secret Store-backed OAuth grants.
+	Credentials func(source.Connection) source.Credentials
 }
 
 func NewSourceSyncUseCase(store source.Store, registry source.Registry, ingester SourceTextIngester) *SourceSyncUseCase {
@@ -54,6 +57,16 @@ func (u *SourceSyncUseCase) Sync(ctx context.Context, connectionID string) (*sou
 	if !ok {
 		return nil, fmt.Errorf("source provider %q is not registered", connection.Provider)
 	}
+	pull := connector.Pull
+	if credentialed, ok := connector.(source.CredentialedConnector); ok {
+		if u.Credentials == nil {
+			return nil, fmt.Errorf("source provider %q needs credentials but none are configured", connection.Provider)
+		}
+		creds := u.Credentials(*connection)
+		pull = func(ctx context.Context, c source.Connection, cursor string) (source.Batch, error) {
+			return credentialed.PullWithCredentials(ctx, c, cursor, creds)
+		}
+	}
 
 	job := source.SyncJob{
 		ID: u.NewID(), ConnectionID: connection.ID, Status: source.JobStatusRunning,
@@ -76,7 +89,7 @@ func (u *SourceSyncUseCase) Sync(ctx context.Context, connectionID string) (*sou
 		if batchNumber >= u.MaxBatches {
 			return fail(fmt.Errorf("source sync exceeded %d batches", u.MaxBatches))
 		}
-		batch, err := connector.Pull(ctx, *connection, cursor)
+		batch, err := pull(ctx, *connection, cursor)
 		if err != nil {
 			return fail(fmt.Errorf("pulling %s source: %w", connection.Provider, err))
 		}

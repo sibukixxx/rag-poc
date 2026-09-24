@@ -13,20 +13,22 @@ import (
 
 // Action names. Keep them stable: operators filter and alert on them.
 const (
-	ActionAuthLogin              = "auth.login"
-	ActionRuntimeTokenIssue      = "runtime_token.issue"
-	ActionRuntimeTokenRevoke     = "runtime_token.revoke"
-	ActionRuntimeAuthRejected    = "runtime_token.rejected"
-	ActionDeploymentCreate       = "deployment.create"
-	ActionDocumentDelete         = "document.delete"
-	ActionKnowledgeBaseDelete    = "knowledge_base.delete"
-	ActionProviderInvoke         = "provider.invoke"
-	ActionEgressPolicyApplied    = "egress_policy.apply"
-	ActionServerStart            = "server.start"
-	ActionSourceConnectionCreate = "source_connection.create"
-	ActionIngestionJobControl    = "ingestion_job.control"
-	ActionSecretSet              = "secret.set"
-	ActionSecretDelete           = "secret.delete"
+	ActionAuthLogin               = "auth.login"
+	ActionRuntimeTokenIssue       = "runtime_token.issue"
+	ActionRuntimeTokenRevoke      = "runtime_token.revoke"
+	ActionRuntimeAuthRejected     = "runtime_token.rejected"
+	ActionDeploymentCreate        = "deployment.create"
+	ActionDocumentDelete          = "document.delete"
+	ActionKnowledgeBaseDelete     = "knowledge_base.delete"
+	ActionProviderInvoke          = "provider.invoke"
+	ActionEgressPolicyApplied     = "egress_policy.apply"
+	ActionServerStart             = "server.start"
+	ActionSourceConnectionCreate  = "source_connection.create"
+	ActionIngestionJobControl     = "ingestion_job.control"
+	ActionSourceConnectionControl = "source_connection.control"
+	ActionSourceAuthorize         = "source_connection.authorize"
+	ActionSecretSet               = "secret.set"
+	ActionSecretDelete            = "secret.delete"
 )
 
 type Outcome string
