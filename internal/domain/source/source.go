@@ -67,18 +67,18 @@ const (
 )
 
 type SyncJob struct {
-	ID           string
-	ConnectionID string
-	Status       JobStatus
-	CursorBefore string
-	CursorAfter  string
-	Created      int
-	Updated      int
-	Deleted      int
-	Skipped      int
-	Error        string
-	StartedAt    time.Time
-	FinishedAt   *time.Time
+	ID           string     `json:"id"`
+	ConnectionID string     `json:"connection_id"`
+	Status       JobStatus  `json:"status"`
+	CursorBefore string     `json:"-"`
+	CursorAfter  string     `json:"-"`
+	Created      int        `json:"created"`
+	Updated      int        `json:"updated"`
+	Deleted      int        `json:"deleted"`
+	Skipped      int        `json:"skipped"`
+	Error        string     `json:"error,omitempty"`
+	StartedAt    time.Time  `json:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
 // Document is the canonical representation returned by every connector.

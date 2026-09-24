@@ -40,25 +40,27 @@ const (
 // Deps carries the dependencies handlers need. It grows as usecases are
 // added; keeping it as a struct avoids reshuffling NewRouter's signature.
 type Deps struct {
-	DB          *sql.DB
-	Version     string
-	Chat        *usecase.ChatUseCase
-	Knowledge   knowledge.Store
-	Ingest      *usecase.IngestUseCase
-	Search      *usecase.SearchUseCase
-	RAGChat     *usecase.RAGChatUseCase
-	Prompts     prompt.Store
-	Traces      trace.Store
-	Datasets    eval.Store
-	Eval        *usecase.EvaluationUseCase
-	Compare     *usecase.CompareUseCase
-	Deployments *usecase.DeploymentUseCase
-	Runtime     *usecase.RuntimeUseCase
-	Lifecycle   *usecase.DataLifecycleUseCase
-	Audit       audit.Store
-	BulkIngest  *usecase.BulkIngestUseCase
-	Scheduler   handler.JobScheduler
-	DemoAuth    *handler.DemoAuthHandler
+	DB              *sql.DB
+	Version         string
+	Chat            *usecase.ChatUseCase
+	Knowledge       knowledge.Store
+	Ingest          *usecase.IngestUseCase
+	Search          *usecase.SearchUseCase
+	RAGChat         *usecase.RAGChatUseCase
+	Prompts         prompt.Store
+	Traces          trace.Store
+	Datasets        eval.Store
+	Eval            *usecase.EvaluationUseCase
+	Compare         *usecase.CompareUseCase
+	Deployments     *usecase.DeploymentUseCase
+	Runtime         *usecase.RuntimeUseCase
+	Lifecycle       *usecase.DataLifecycleUseCase
+	Audit           audit.Store
+	BulkIngest      *usecase.BulkIngestUseCase
+	SourceControl   *usecase.SourceControlUseCase
+	OAuthConnectors []string
+	Scheduler       handler.JobScheduler
+	DemoAuth        *handler.DemoAuthHandler
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -80,7 +82,7 @@ func NewRouter(deps Deps) http.Handler {
 	deployments := handler.NewDeploymentHandler(deps.Deployments, deps.Runtime)
 	lifecycleHandler := handler.NewLifecycleHandler(deps.Lifecycle)
 	auditHandler := handler.NewAuditHandler(deps.Audit)
-	sources := handler.NewSourceHandler(deps.BulkIngest, deps.Scheduler)
+	sources := handler.NewSourceHandler(deps.BulkIngest, deps.SourceControl, deps.Scheduler, deps.OAuthConnectors)
 	demoAuth := deps.DemoAuth
 
 	if demoAuth != nil {
@@ -117,6 +119,12 @@ func NewRouter(deps Deps) http.Handler {
 			// #30 source connections and resumable bulk ingestion jobs.
 			r.With(limitBody(maxJSONBody)).Post("/source-connections", sources.CreateConnection)
 			r.Get("/source-connections", sources.ListConnections)
+			r.Get("/source-catalog", sources.Catalog)
+			r.Post("/source-connections/{id}/authorize", sources.Authorize)
+			r.Post("/source-connections/{id}/sync", sources.Sync)
+			r.Post("/source-connections/{id}/enable", sources.SetEnabled(true))
+			r.Post("/source-connections/{id}/disable", sources.SetEnabled(false))
+			r.Delete("/source-connections/{id}", sources.Disconnect)
 			r.Post("/source-connections/{id}/jobs", sources.StartJob)
 			r.Get("/source-connections/{id}/jobs", sources.ListJobs)
 			r.Get("/ingestion-jobs/{id}", sources.GetJob)
@@ -150,6 +158,15 @@ func NewRouter(deps Deps) http.Handler {
 			r.Delete("/deployments/{id}/tokens/{tokenID}", deployments.RevokeToken)
 		})
 	})
+
+	// OAuth provider redirect. It is a cross-site top-level navigation, so it
+	// lives outside /api/v1 (whose cross-site guard would reject it); the
+	// single-use state is its CSRF protection.
+	callback := http.Handler(http.HandlerFunc(sources.OAuthCallback))
+	if demoAuth != nil {
+		callback = demoAuth.RequirePage(callback)
+	}
+	r.Method(http.MethodGet, "/oauth/callback", callback)
 
 	// Runtime is deliberately outside the management/demo session boundary.
 	// Authentication is a per-deployment Bearer token; the handler also

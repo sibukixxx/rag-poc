@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -156,6 +157,58 @@ func TestLoadRejectsInvalidFilesystemSourceSettings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "forgeai.yaml")
 			if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := config.Load(path)
+
+			if err == nil || err.Error() != "invalid config "+path+": "+tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadParsesOAuthProvidersWithPKCEOnByDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "forgeai.yaml")
+	yaml := `sources:
+  oauth_providers:
+    corp_idp:
+      authorization_url: https://idp.example/authorize
+      token_url: https://idp.example/token
+      client_id: forgeai
+      client_secret_secret: corp-idp-client
+      scopes: [files.read]
+      redirect_url: https://forgeai.corp.example/oauth/callback
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Sources.OAuthProviders["corp_idp"]
+	if p.ClientID != "forgeai" || p.ClientSecretSecret != "corp-idp-client" || !p.PKCEEnabled() || p.Scopes[0] != "files.read" {
+		t.Fatalf("provider = %+v", p)
+	}
+}
+
+func TestLoadRejectsUnsafeOAuthProviderSettings(t *testing.T) {
+	base := "sources:\n  oauth_providers:\n    idp:\n      authorization_url: %s\n      token_url: https://idp.example/token\n      client_id: c\n      redirect_url: %s\n"
+	tests := []struct {
+		name, authURL, redirect, want string
+	}{
+		{"plain http provider", "http://idp.example/authorize", "https://f.example/oauth/callback", `sources.oauth_providers.idp.authorization_url must be an https URL (http is allowed only for localhost), got "http://idp.example/authorize"`},
+		{"wrong callback path", "https://idp.example/authorize", "https://f.example/callback", `sources.oauth_providers.idp.redirect_url must end with /oauth/callback, got "https://f.example/callback"`},
+		{"local dev redirect is fine but relative is not", "https://idp.example/authorize", "/oauth/callback", `sources.oauth_providers.idp.redirect_url must be an https URL (http is allowed only for localhost), got "/oauth/callback"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "forgeai.yaml")
+			if err := os.WriteFile(path, []byte(fmt.Sprintf(base, tt.authURL, tt.redirect)), 0o600); err != nil {
 				t.Fatal(err)
 			}
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -401,4 +402,97 @@ func (u *SourceControlUseCase) recordSyncError(ctx context.Context, connectionID
 		return nil // already carries the actionable message
 	}
 	return u.Sources.UpdateConnectionAuth(ctx, connectionID, conn.AuthState, conn.SecretName, truncateForAudit(syncErr.Error()), u.Now())
+}
+
+// ConnectionView is what the control plane shows for one connection. It
+// carries scope and state, never credentials.
+type ConnectionView struct {
+	ID              string                  `json:"id"`
+	KnowledgeBaseID string                  `json:"knowledge_base_id"`
+	Provider        string                  `json:"provider"`
+	Name            string                  `json:"name"`
+	Enabled         bool                    `json:"enabled"`
+	AuthState       source.AuthState        `json:"auth_state"`
+	LastError       string                  `json:"last_error,omitempty"`
+	OAuthProvider   string                  `json:"oauth_provider,omitempty"`
+	Scope           json.RawMessage         `json:"scope,omitempty"`
+	Filesystem      *FilesystemSourceConfig `json:"filesystem,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	UpdatedAt       time.Time               `json:"updated_at"`
+	LatestJob       *JobProgress            `json:"latest_job,omitempty"`
+	LatestSync      *source.SyncJob         `json:"latest_sync,omitempty"`
+}
+
+// ListConnections returns a knowledge base's connections with their state
+// and most recent sync evidence.
+func (u *SourceControlUseCase) ListConnections(ctx context.Context, knowledgeBaseID string) ([]ConnectionView, error) {
+	conns, err := u.Sources.ListConnections(ctx, knowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ConnectionView, 0, len(conns))
+	for _, c := range conns {
+		v := ConnectionView{
+			ID: c.ID, KnowledgeBaseID: c.KnowledgeBaseID, Provider: c.Provider, Name: c.Name, Enabled: c.Enabled,
+			AuthState: c.AuthState, LastError: c.LastError, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		}
+		if c.Provider == FilesystemProvider {
+			var cfg FilesystemSourceConfig
+			if json.Unmarshal(c.Config, &cfg) == nil {
+				v.Filesystem = &cfg
+			}
+			if u.Bulk != nil {
+				jobs, err := u.Bulk.Jobs.ListJobs(ctx, c.ID, 1)
+				if err != nil {
+					return nil, err
+				}
+				if len(jobs) == 1 {
+					p, err := u.Bulk.Progress(ctx, jobs[0].ID)
+					if err != nil {
+						return nil, err
+					}
+					v.LatestJob = &p
+				}
+			}
+		} else {
+			var cfg oauthConfig
+			if json.Unmarshal(c.Config, &cfg) == nil {
+				v.OAuthProvider, v.Scope = cfg.OAuthProvider, cfg.Scope
+			}
+			job, err := u.Sources.LatestJob(ctx, c.ID)
+			switch {
+			case err == nil:
+				v.LatestSync = job
+			case !errors.Is(err, source.ErrNotFound):
+				return nil, err
+			}
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// Catalog describes what this server can connect to, so the UI only offers
+// sources that actually work here.
+type Catalog struct {
+	FilesystemEnabled bool     `json:"filesystem_enabled"`
+	AllowedRoots      []string `json:"allowed_roots"`
+	OAuthConnectors   []string `json:"oauth_connectors"`
+	OAuthProviders    []string `json:"oauth_providers"`
+}
+
+func (u *SourceControlUseCase) Catalog(oauthConnectors []string) Catalog {
+	c := Catalog{AllowedRoots: []string{}, OAuthConnectors: oauthConnectors, OAuthProviders: []string{}}
+	if c.OAuthConnectors == nil {
+		c.OAuthConnectors = []string{}
+	}
+	if u.Bulk != nil && len(u.Bulk.AllowedRoots) > 0 {
+		c.FilesystemEnabled = true
+		c.AllowedRoots = append(c.AllowedRoots, u.Bulk.AllowedRoots...)
+	}
+	for name := range u.Providers {
+		c.OAuthProviders = append(c.OAuthProviders, name)
+	}
+	sort.Strings(c.OAuthProviders)
+	return c
 }
