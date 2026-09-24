@@ -75,7 +75,7 @@ func TestRetentionCheckDescribesPolicy(t *testing.T) {
 
 	got := retentionCheck(cfg)
 
-	want := CheckStatus{Name: "Retention", OK: true, Info: "traces=30d evaluation_runs=keep (apply with `forgeai data retention`)"}
+	want := CheckStatus{Name: "Retention", OK: true, Info: "traces=30d evaluation_runs=keep audit=keep (apply with `forgeai data retention`)"}
 	if got != want {
 		t.Fatalf("retentionCheck = %+v, want %+v", got, want)
 	}

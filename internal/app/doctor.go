@@ -198,7 +198,7 @@ func retentionCheck(cfg config.Config) CheckStatus {
 	}
 	return CheckStatus{
 		Name: "Retention", OK: true,
-		Info: fmt.Sprintf("traces=%s evaluation_runs=%s (apply with `forgeai data retention`)", days(cfg.Retention.TraceDays), days(cfg.Retention.EvaluationRunDays)),
+		Info: fmt.Sprintf("traces=%s evaluation_runs=%s audit=%s (apply with `forgeai data retention`)", days(cfg.Retention.TraceDays), days(cfg.Retention.EvaluationRunDays), days(cfg.Retention.AuditDays)),
 	}
 }
 
