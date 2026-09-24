@@ -43,7 +43,7 @@ func (a *App) BulkIngest() (*usecase.BulkIngestUseCase, error) {
 // every job left queued or interrupted by a previous process.
 type jobRunner struct {
 	uc     *usecase.BulkIngestUseCase
-	queue  chan string
+	queue  chan func(context.Context)
 	once   sync.Once
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -52,7 +52,7 @@ type jobRunner struct {
 
 func newJobRunner(uc *usecase.BulkIngestUseCase) *jobRunner {
 	ctx, cancel := context.WithCancel(audit.WithActor(context.Background(), "system"))
-	return &jobRunner{uc: uc, queue: make(chan string, 256), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	return &jobRunner{uc: uc, queue: make(chan func(context.Context), 256), ctx: ctx, cancel: cancel, done: make(chan struct{})}
 }
 
 func (r *jobRunner) start() {
@@ -66,24 +66,31 @@ func (r *jobRunner) start() {
 				select {
 				case <-r.ctx.Done():
 					return
-				case id := <-r.queue:
-					if _, err := r.uc.Run(r.ctx, id); err != nil && r.ctx.Err() == nil {
-						log.Printf("ingestion: job %s: %v", id, err)
-					}
+				case task := <-r.queue:
+					task(r.ctx)
 				}
 			}
 		}()
 	})
 }
 
-// Enqueue schedules a job. If the queue is full the job stays queued in the
-// database and is picked up by the next resume.
+// Enqueue schedules an ingestion job. If the queue is full the job stays
+// queued in the database and is picked up by the next resume.
 func (r *jobRunner) Enqueue(jobID string) {
+	r.Submit(func(ctx context.Context) {
+		if _, err := r.uc.Run(ctx, jobID); err != nil && ctx.Err() == nil {
+			log.Printf("ingestion: job %s: %v", jobID, err)
+		}
+	})
+}
+
+// Submit runs fn on the background worker (e.g. an API connector sync).
+func (r *jobRunner) Submit(fn func(ctx context.Context)) {
 	r.start()
 	select {
-	case r.queue <- jobID:
+	case r.queue <- fn:
 	default:
-		log.Printf("ingestion: queue full; job %s will run on the next resume", jobID)
+		log.Printf("sources: background queue full; request dropped (retry later)")
 	}
 }
 

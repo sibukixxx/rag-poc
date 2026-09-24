@@ -1655,3 +1655,180 @@
 .doc-row.verdict-mixed td:first-child {
   color: #d97706;
 }
+
+/* Source connections (#30/#31) */
+.conn-section {
+  max-width: 1180px;
+  margin: 0 auto 22px;
+}
+
+.conn-heading {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.conn-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conn-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+}
+
+.conn-card.conn-disabled {
+  opacity: 0.7;
+}
+
+.conn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.conn-name {
+  margin-right: 8px;
+}
+
+.conn-provider {
+  color: var(--muted, #64748b);
+  font-size: 0.8rem;
+}
+
+.conn-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.conn-badge {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.74rem;
+}
+
+.conn-badge.ok {
+  border-color: rgba(22, 163, 74, 0.4);
+  color: #15803d;
+}
+
+.conn-badge.warn {
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #b91c1c;
+}
+
+.conn-badge.muted {
+  color: #64748b;
+}
+
+.conn-scope {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.conn-scope dt {
+  color: #64748b;
+}
+
+.conn-scope dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conn-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 0.82rem;
+}
+
+.conn-stats small {
+  color: #64748b;
+}
+
+.conn-stats .bad,
+.source-form .bad {
+  color: #b91c1c;
+}
+
+.conn-failures {
+  font-size: 0.8rem;
+}
+
+.conn-failures ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.conn-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.07);
+  color: #b91c1c;
+  font-size: 0.82rem;
+}
+
+.conn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.conn-actions button {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
+.conn-actions button.secondary {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border);
+}
+
+.conn-actions button.danger {
+  background: transparent;
+  color: #b91c1c;
+  border: 1px solid rgba(220, 38, 38, 0.4);
+}
+
+.source-form {
+  display: grid;
+  gap: 8px;
+}
+
+.source-form h3 {
+  margin: 0;
+}
+
+.source-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.source-form input,
+.source-form select,
+.source-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.source-form small {
+  color: #64748b;
+  font-size: 0.74rem;
+}

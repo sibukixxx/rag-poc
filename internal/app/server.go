@@ -88,27 +88,33 @@ func (a *App) Handler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	control, err := a.SourceControl()
+	if err != nil {
+		return nil, err
+	}
 
 	handler := forgehttp.NewRouter(forgehttp.Deps{
-		DB:          a.DB,
-		Version:     Version,
-		Chat:        chat,
-		Knowledge:   knowledgeStore,
-		Ingest:      ingest,
-		Search:      search,
-		RAGChat:     ragChat,
-		Prompts:     promptStore,
-		Traces:      traces,
-		Datasets:    datasets,
-		Eval:        evalUC,
-		Compare:     compareUC,
-		Deployments: deploymentUC,
-		Runtime:     runtimeUC,
-		Lifecycle:   lifecycleUC,
-		Audit:       auditStore,
-		BulkIngest:  runner.uc,
-		Scheduler:   runner,
-		DemoAuth:    demoAuthHandler,
+		DB:              a.DB,
+		Version:         Version,
+		Chat:            chat,
+		Knowledge:       knowledgeStore,
+		Ingest:          ingest,
+		Search:          search,
+		RAGChat:         ragChat,
+		Prompts:         promptStore,
+		Traces:          traces,
+		Datasets:        datasets,
+		Eval:            evalUC,
+		Compare:         compareUC,
+		Deployments:     deploymentUC,
+		Runtime:         runtimeUC,
+		Lifecycle:       lifecycleUC,
+		Audit:           auditStore,
+		BulkIngest:      runner.uc,
+		SourceControl:   control,
+		OAuthConnectors: a.oauthConnectorNames(),
+		Scheduler:       runner,
+		DemoAuth:        demoAuthHandler,
 	})
 
 	return handler, nil

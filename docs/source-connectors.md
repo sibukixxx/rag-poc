@@ -105,6 +105,49 @@ HTTP API は `POST /api/v1/source-connections`（`provider: "filesystem"`）、`
 
 分散キューや複数ノードのワーカーは対象外。現行の SQLite 総当たりベクトル検索は数百万チャンク規模を想定していない。
 
+## Web コントロールプレーン（#31）
+
+ブラウザは**コントロールプレーン**、ForgeAI サーバーは**データプレーン**。
+
+| ブラウザ（管理画面） | ForgeAI サーバー |
+|---|---|
+| 接続先と読み取り範囲の指定 | プロバイダ API の呼び出し、初回全件同期、差分同期 |
+| OAuth の認可（同意画面を開く） | コード交換、認可情報の暗号化保存とリフレッシュ |
+| 状態・件数・失敗・最終エラーの確認 | 同期ジョブの実行と記録、削除の反映 |
+| 同期実行・一時停止・中止・無効化・切断 | ブラウザを閉じても同期を続行 |
+
+データ連携タブで、接続ごとに範囲、有効状態、認可状態（`not_required` / `authorization_required` / `authorized` / `reauthorization_required`）、最新の同期件数、失敗ファイル、最終エラーを確認できる。
+
+### OAuth 認可コードフロー
+
+```yaml
+sources:
+  oauth_providers:
+    corp_idp:
+      authorization_url: https://idp.example.com/oauth2/authorize
+      token_url: https://idp.example.com/oauth2/token
+      client_id: forgeai
+      client_secret_env: FORGEAI_CORP_IDP_SECRET   # または client_secret_secret: <Secret Store 名>
+      scopes: [files.read]
+      redirect_url: https://forgeai.corp.example.com/oauth/callback
+      # pkce: true（既定）
+```
+
+1. `POST /api/v1/source-connections` に `provider`（OAuth コネクタ名）、`oauth_provider`、`scope`（読み取り範囲の JSON）を渡すと、`authorization_required` の接続ができる。範囲に `token` / `secret` / `password` などのキーがあれば拒否する。
+2. `POST /api/v1/source-connections/{id}/authorize` が認可 URL を返す。state は 32 バイトの乱数で、ハッシュだけを 10 分間保存し一度しか使えない。PKCE（S256）を付ける。
+3. プロバイダが `GET /oauth/callback` に戻す。state を検証してコードを交換し、アクセストークンとリフレッシュトークンを Secret Store に AES-GCM で保存する。`config_json`・ソース系テーブル・監査ログにはトークンを書かない。
+4. 以後の同期はサーバーが Secret Store から取り出し、期限切れならリフレッシュする。`invalid_grant` なら `reauthorization_required` にして、画面に再認可を促す。
+5. 切断（`DELETE /api/v1/source-connections/{id}`）は、接続・同期した文書・保存した認可情報を削除する。プロバイダ側の元データは変更しない。
+
+OAuth を使わないソース（フォルダ、今後の HTTP フィードやサービスアカウント型）は、このフローを通らない。v0.1 には実際の OAuth コネクタは同梱していない。コネクタを登録したビルドでだけ、画面に「外部サービス」の追加フォームが出る。
+
+### 配置の前提
+
+- 管理画面・`/api/v1`・`/oauth/callback` は、顧客のリバースプロキシや ID 基盤（Cloudflare Access、OAuth2 Proxy、SSO ゲートウェイ）の内側に置く。ForgeAI は認証なしの公開管理画面を前提にしない。
+- 外部 OAuth プロバイダを使う場合は、`redirect_url` にブラウザから到達できること、プロバイダに同じ URL を登録することが必要。
+- サーバーから許可したプロバイダのエンドポイントへ HTTPS で出られること。
+- 認可情報の保存には `FORGEAI_MASTER_KEY` が必要。未設定なら認可は完了しない。
+
 ## 次の実装
 
 最初の実コネクタはSlack読み取り専用とする。

@@ -51,6 +51,8 @@ Every event has `id`, `occurred_at`, `action`, `outcome` (`success`, `failure`, 
 | `server.start` | `forgeai serve` starts | `version`, `profile`, `privacy_mode`, `outbound_policy`, allowed destinations and provider origins |
 | `source_connection.create` | a filesystem source is registered | `provider`, `knowledge_base_id`, `root`, `include`, `exclude` |
 | `ingestion_job.control` | a bulk job is started, paused, cancelled, resumed, or reconciles removed files | `request`, `connection_id` or `deleted` |
+| `source_connection.authorize` | an OAuth consent completes, is denied, uses an invalid state, or a grant needs reauthorization | `oauth_provider` or `reason` |
+| `source_connection.control` | a connection is enabled, disabled, synced, or disconnected | `request`, `documents_removed` |
 | `secret.set`, `secret.delete` | CLI changed a stored secret | target is the secret name |
 
 Successful Runtime authentications are not recorded one by one. The provider calls they cause are recorded with the runtime token ID as actor.

@@ -9,6 +9,7 @@ import (
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/config"
 	"github.com/sibukixxx/rag-poc/internal/domain/secret"
+	"github.com/sibukixxx/rag-poc/internal/domain/source"
 )
 
 // Version is set at build time via -ldflags; "dev" is used for local builds.
@@ -18,6 +19,9 @@ var Version = "dev"
 type App struct {
 	Config config.Config
 	DB     *sql.DB
+	// Connectors are the API source connectors available to this process.
+	// They are registered at wiring time; none ship enabled in v0.1.
+	Connectors []source.Connector
 
 	runnerMu sync.Mutex
 	runner   *jobRunner

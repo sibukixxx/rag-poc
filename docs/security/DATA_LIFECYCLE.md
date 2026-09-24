@@ -19,7 +19,8 @@ All application data lives in one SQLite database (`database.path`, default `./d
 | Evaluation results | `evaluation_runs`, `evaluation_results` | **Yes**: generated answers, judge reasons, retrieved filenames | KB deletion, or retention (`retention.evaluation_runs_days`) |
 | Traces | `traces`, `spans` | Operation names, models, token/cost, error text. Prompts, questions, and chunk text are **not** stored (the `input`/`output` columns are unused) | Retention (`retention.traces_days`) |
 | Deployments | `deployments`, `runtime_api_tokens` | Frozen prompt text (operator-authored) and token hashes | KB deletion with `include_deployments` |
-| Secrets | `secrets` | Provider API keys, AES-GCM encrypted | `forgeai secret delete` |
+| Secrets | `secrets` | Provider API keys and source OAuth grants (`source-oauth:<connection>`), AES-GCM encrypted | `forgeai secret delete`; OAuth grants are deleted when the connection is disconnected |
+| Pending OAuth authorizations | `oauth_states` | State hash, PKCE verifier, 10-minute expiry | Consumed on callback; expired rows are pruned; deleted with the connection |
 
 Uploaded files are **not** kept. Upload, `forgeai ingest`, and filesystem sources extract text in memory; `storage.path` is created but no original document is written to it in v0.1. Filesystem sources read files in place from `sources.filesystem.allowed_roots`; deleting data in ForgeAI never deletes the original files.
 
@@ -28,6 +29,7 @@ Uploaded files are **not** kept. Upload, `forgeai ingest`, and filesystem source
 | Operation | HTTP | CLI |
 |---|---|---|
 | Delete one document | `DELETE /api/v1/knowledge-bases/{id}/documents/{docID}` | `forgeai data delete-document <document-id>` |
+| Disconnect a source | `DELETE /api/v1/source-connections/{id}` | — |
 | Delete a knowledge base | `DELETE /api/v1/knowledge-bases/{id}[?include_deployments=true]` | `forgeai data delete-kb -kb <slug> [-include-deployments]` |
 | Apply retention | — | `forgeai data retention` |
 | Remove deleted pages from the database files | — | `forgeai data compact`, or `-compact` on a delete command |

@@ -4,9 +4,11 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -31,7 +33,43 @@ type Config struct {
 
 // SourcesConfig configures source connectors that the server runs.
 type SourcesConfig struct {
-	Filesystem FilesystemSourceConfig `yaml:"filesystem"`
+	Filesystem     FilesystemSourceConfig         `yaml:"filesystem"`
+	OAuthProviders map[string]OAuthProviderConfig `yaml:"oauth_providers"`
+}
+
+// OAuthProviderConfig is one authorization server used by OAuth-capable
+// connectors (#31). The client secret is read from an environment variable
+// or the Secret Store, never from this file.
+type OAuthProviderConfig struct {
+	AuthorizationURL   string   `yaml:"authorization_url"`
+	TokenURL           string   `yaml:"token_url"`
+	ClientID           string   `yaml:"client_id"`
+	ClientSecretEnv    string   `yaml:"client_secret_env"`
+	ClientSecretSecret string   `yaml:"client_secret_secret"`
+	Scopes             []string `yaml:"scopes"`
+	// RedirectURL is the externally reachable ForgeAI callback, ending in
+	// /oauth/callback. It must match the provider's registered redirect.
+	RedirectURL string `yaml:"redirect_url"`
+	// PKCE defaults to true; set false only for providers that reject it.
+	PKCE *bool `yaml:"pkce"`
+}
+
+func (p OAuthProviderConfig) PKCEEnabled() bool { return p.PKCE == nil || *p.PKCE }
+
+// secureURL accepts https URLs, and http only for loopback development.
+func secureURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		h := u.Hostname()
+		return h == "localhost" || h == "127.0.0.1" || h == "::1"
+	}
+	return false
 }
 
 // FilesystemSourceConfig bounds local/NAS bulk ingestion (#30).
@@ -280,6 +318,21 @@ func (c Config) validate() error {
 	}
 	if c.Sources.Filesystem.MaxFileBytes < 0 {
 		return fmt.Errorf("sources.filesystem.max_file_bytes must be >= 0, got %d", c.Sources.Filesystem.MaxFileBytes)
+	}
+	for name, p := range c.Sources.OAuthProviders {
+		for _, f := range []struct{ field, value string }{
+			{"authorization_url", p.AuthorizationURL}, {"token_url", p.TokenURL}, {"redirect_url", p.RedirectURL},
+		} {
+			if !secureURL(f.value) {
+				return fmt.Errorf("sources.oauth_providers.%s.%s must be an https URL (http is allowed only for localhost), got %q", name, f.field, f.value)
+			}
+		}
+		if !strings.HasSuffix(strings.TrimRight(p.RedirectURL, "/"), "/oauth/callback") {
+			return fmt.Errorf("sources.oauth_providers.%s.redirect_url must end with /oauth/callback, got %q", name, p.RedirectURL)
+		}
+		if p.ClientID == "" {
+			return fmt.Errorf("sources.oauth_providers.%s.client_id must not be empty", name)
+		}
 	}
 	switch c.Profile {
 	case "", ProfileDevelopment, ProfileProduction:
