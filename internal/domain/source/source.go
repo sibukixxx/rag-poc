@@ -21,9 +21,27 @@ type Connection struct {
 	SecretName      string
 	Cursor          string
 	Enabled         bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// AuthState is the credential lifecycle for OAuth-style connectors.
+	AuthState AuthState
+	// LastError is the most recent operator-actionable failure.
+	LastError string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
+
+// AuthState describes whether a connection's credentials are usable.
+type AuthState string
+
+const (
+	// AuthNotRequired: the connector does not use OAuth (filesystem, feeds).
+	AuthNotRequired AuthState = "not_required"
+	// AuthAuthorizationRequired: created, but no one has consented yet.
+	AuthAuthorizationRequired AuthState = "authorization_required"
+	// AuthAuthorized: a grant is stored in the Secret Store.
+	AuthAuthorized AuthState = "authorized"
+	// AuthReauthorizationRequired: the grant was revoked or expired.
+	AuthReauthorizationRequired AuthState = "reauthorization_required"
+)
 
 type Item struct {
 	ID              string
@@ -92,6 +110,19 @@ type Connector interface {
 	Pull(ctx context.Context, connection Connection, cursor string) (Batch, error)
 }
 
+// Credentials yields a currently valid access token for a connection.
+type Credentials interface {
+	AccessToken(ctx context.Context) (string, error)
+}
+
+// CredentialedConnector is implemented by connectors that call an API on
+// behalf of an authorized account. The sync use case supplies credentials;
+// connectors never read the Secret Store or config_json for tokens.
+type CredentialedConnector interface {
+	Connector
+	PullWithCredentials(ctx context.Context, connection Connection, cursor string, creds Credentials) (Batch, error)
+}
+
 type Registry interface {
 	Get(provider string) (Connector, bool)
 }
@@ -104,6 +135,12 @@ type Store interface {
 	GetConnection(ctx context.Context, id string) (*Connection, error)
 	ListConnections(ctx context.Context, knowledgeBaseID string) ([]Connection, error)
 	UpdateCursor(ctx context.Context, id, cursor string, updatedAt time.Time) error
+	UpdateConnectionAuth(ctx context.Context, id string, state AuthState, secretName, lastError string, at time.Time) error
+	SetConnectionEnabled(ctx context.Context, id string, enabled bool, at time.Time) error
+	// DeleteConnection removes the connection, its items and jobs, and every
+	// document it synced; it returns how many documents were removed.
+	DeleteConnection(ctx context.Context, id string) (int, error)
+	LatestJob(ctx context.Context, connectionID string) (*SyncJob, error)
 
 	GetItem(ctx context.Context, connectionID, externalID string) (*Item, error)
 	ReplaceItemDocument(ctx context.Context, item Item) error

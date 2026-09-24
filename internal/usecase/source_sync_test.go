@@ -43,6 +43,21 @@ func (s *fakeSourceStore) UpdateCursor(_ context.Context, id, cursor string, _ t
 	s.connection.Cursor = cursor
 	return nil
 }
+func (s *fakeSourceStore) UpdateConnectionAuth(_ context.Context, id string, state source.AuthState, secretName, lastError string, _ time.Time) error {
+	if s.connection.ID != id {
+		return source.ErrNotFound
+	}
+	s.connection.AuthState, s.connection.SecretName, s.connection.LastError = state, secretName, lastError
+	return nil
+}
+func (s *fakeSourceStore) SetConnectionEnabled(_ context.Context, id string, enabled bool, _ time.Time) error {
+	s.connection.Enabled = enabled
+	return nil
+}
+func (s *fakeSourceStore) DeleteConnection(context.Context, string) (int, error) { return 0, nil }
+func (s *fakeSourceStore) LatestJob(context.Context, string) (*source.SyncJob, error) {
+	return nil, source.ErrNotFound
+}
 func sourceItemKey(connectionID, externalID string) string { return connectionID + "\x00" + externalID }
 func (s *fakeSourceStore) GetItem(_ context.Context, connectionID, externalID string) (*source.Item, error) {
 	item, ok := s.items[sourceItemKey(connectionID, externalID)]

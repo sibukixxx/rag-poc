@@ -22,6 +22,9 @@ func (s *SourceStore) CreateConnection(ctx context.Context, c source.Connection)
 	if len(c.Config) == 0 {
 		c.Config = []byte("{}")
 	}
+	if c.AuthState == "" {
+		c.AuthState = source.AuthNotRequired
+	}
 	now := c.CreatedAt
 	if now.IsZero() {
 		now = time.Now()
@@ -32,62 +35,121 @@ func (s *SourceStore) CreateConnection(ctx context.Context, c source.Connection)
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO source_connections
-		(id, knowledge_base_id, provider, name, config_json, secret_name, cursor, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, knowledge_base_id, provider, name, config_json, secret_name, cursor, enabled, auth_state, last_error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, c.ID, c.KnowledgeBaseID, c.Provider, c.Name, string(c.Config), c.SecretName, c.Cursor, c.Enabled,
-		now.Format(timeLayout), updated.Format(timeLayout))
+		string(c.AuthState), c.LastError, now.Format(timeLayout), updated.Format(timeLayout))
 	if err != nil {
 		return fmt.Errorf("creating source connection %s: %w", c.ID, err)
 	}
 	return nil
 }
 
-func (s *SourceStore) GetConnection(ctx context.Context, id string) (*source.Connection, error) {
+const connectionColumns = `id, knowledge_base_id, provider, name, config_json, secret_name, cursor, enabled,
+	auth_state, last_error, created_at, updated_at`
+
+func scanConnection(row rowScanner) (*source.Connection, error) {
 	var c source.Connection
-	var config, createdAt, updatedAt string
+	var config, authState, createdAt, updatedAt string
 	var enabled int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, knowledge_base_id, provider, name, config_json, secret_name, cursor, enabled, created_at, updated_at
-		FROM source_connections WHERE id = ?
-	`, id).Scan(&c.ID, &c.KnowledgeBaseID, &c.Provider, &c.Name, &config, &c.SecretName, &c.Cursor, &enabled, &createdAt, &updatedAt)
+	if err := row.Scan(&c.ID, &c.KnowledgeBaseID, &c.Provider, &c.Name, &config, &c.SecretName, &c.Cursor, &enabled,
+		&authState, &c.LastError, &createdAt, &updatedAt); err != nil {
+		return nil, err
+	}
+	c.Config = []byte(config)
+	c.Enabled = enabled != 0
+	c.AuthState = source.AuthState(authState)
+	c.CreatedAt, _ = time.Parse(timeLayout, createdAt)
+	c.UpdatedAt, _ = time.Parse(timeLayout, updatedAt)
+	return &c, nil
+}
+
+func (s *SourceStore) GetConnection(ctx context.Context, id string) (*source.Connection, error) {
+	c, err := scanConnection(s.db.QueryRowContext(ctx, `SELECT `+connectionColumns+` FROM source_connections WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, source.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading source connection %s: %w", id, err)
 	}
-	c.Config = []byte(config)
-	c.Enabled = enabled != 0
-	c.CreatedAt, _ = time.Parse(timeLayout, createdAt)
-	c.UpdatedAt, _ = time.Parse(timeLayout, updatedAt)
-	return &c, nil
+	return c, nil
 }
 
 func (s *SourceStore) ListConnections(ctx context.Context, knowledgeBaseID string) ([]source.Connection, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, knowledge_base_id, provider, name, config_json, secret_name, cursor, enabled, created_at, updated_at
-		FROM source_connections WHERE knowledge_base_id = ? ORDER BY created_at DESC
-	`, knowledgeBaseID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+connectionColumns+` FROM source_connections
+		WHERE knowledge_base_id = ? ORDER BY created_at DESC`, knowledgeBaseID)
 	if err != nil {
 		return nil, fmt.Errorf("listing source connections: %w", err)
 	}
 	defer rows.Close()
 	var out []source.Connection
 	for rows.Next() {
-		var c source.Connection
-		var config, createdAt, updatedAt string
-		var enabled int
-		if err := rows.Scan(&c.ID, &c.KnowledgeBaseID, &c.Provider, &c.Name, &config, &c.SecretName,
-			&c.Cursor, &enabled, &createdAt, &updatedAt); err != nil {
+		c, err := scanConnection(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning source connection: %w", err)
 		}
-		c.Config = []byte(config)
-		c.Enabled = enabled != 0
-		c.CreatedAt, _ = time.Parse(timeLayout, createdAt)
-		c.UpdatedAt, _ = time.Parse(timeLayout, updatedAt)
-		out = append(out, c)
+		out = append(out, *c)
 	}
 	return out, rows.Err()
+}
+
+func (s *SourceStore) UpdateConnectionAuth(ctx context.Context, id string, state source.AuthState, secretName, lastError string, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE source_connections SET auth_state = ?, secret_name = ?, last_error = ?, updated_at = ? WHERE id = ?`,
+		string(state), secretName, lastError, at.UTC().Format(timeLayout), id)
+	if err != nil {
+		return fmt.Errorf("updating source connection auth %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return source.ErrNotFound
+	}
+	return nil
+}
+
+func (s *SourceStore) SetConnectionEnabled(ctx context.Context, id string, enabled bool, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE source_connections SET enabled = ?, updated_at = ? WHERE id = ?`,
+		enabled, at.UTC().Format(timeLayout), id)
+	if err != nil {
+		return fmt.Errorf("updating source connection %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return source.ErrNotFound
+	}
+	return nil
+}
+
+func (s *SourceStore) DeleteConnection(ctx context.Context, id string) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT document_id FROM source_items WHERE connection_id = ? AND document_id IS NOT NULL`, id)
+	if err != nil {
+		return 0, fmt.Errorf("listing connection documents: %w", err)
+	}
+	var docIDs []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		docIDs = append(docIDs, d)
+	}
+	rows.Close()
+	for _, d := range docIDs {
+		if err := deleteSourceDocument(ctx, tx, d); err != nil {
+			return 0, err
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM source_connections WHERE id = ?`, id)
+	if err != nil {
+		return 0, fmt.Errorf("deleting source connection %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return 0, source.ErrNotFound
+	}
+	return len(docIDs), tx.Commit()
 }
 
 func (s *SourceStore) UpdateCursor(ctx context.Context, id, cursor string, updatedAt time.Time) error {
@@ -261,26 +323,44 @@ func (s *SourceStore) FinishJob(ctx context.Context, job source.SyncJob) error {
 	return nil
 }
 
-func (s *SourceStore) GetJob(ctx context.Context, id string) (*source.SyncJob, error) {
+const syncJobColumns = `id, connection_id, status, cursor_before, cursor_after, created_count, updated_count,
+	deleted_count, skipped_count, error, started_at, finished_at`
+
+func scanSyncJob(row rowScanner) (*source.SyncJob, error) {
 	var job source.SyncJob
 	var status, startedAt string
 	var finishedAt sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, connection_id, status, cursor_before, cursor_after, created_count, updated_count,
-		       deleted_count, skipped_count, error, started_at, finished_at
-		FROM source_sync_jobs WHERE id = ?
-	`, id).Scan(&job.ID, &job.ConnectionID, &status, &job.CursorBefore, &job.CursorAfter, &job.Created,
-		&job.Updated, &job.Deleted, &job.Skipped, &job.Error, &startedAt, &finishedAt)
+	if err := row.Scan(&job.ID, &job.ConnectionID, &status, &job.CursorBefore, &job.CursorAfter, &job.Created,
+		&job.Updated, &job.Deleted, &job.Skipped, &job.Error, &startedAt, &finishedAt); err != nil {
+		return nil, err
+	}
+	job.Status = source.JobStatus(status)
+	job.StartedAt, _ = time.Parse(timeLayout, startedAt)
+	job.FinishedAt = parseOptionalTime(finishedAt)
+	return &job, nil
+}
+
+func (s *SourceStore) GetJob(ctx context.Context, id string) (*source.SyncJob, error) {
+	job, err := scanSyncJob(s.db.QueryRowContext(ctx, `SELECT `+syncJobColumns+` FROM source_sync_jobs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, source.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading source sync job %s: %w", id, err)
 	}
-	job.Status = source.JobStatus(status)
-	job.StartedAt, _ = time.Parse(timeLayout, startedAt)
-	job.FinishedAt = parseOptionalTime(finishedAt)
-	return &job, nil
+	return job, nil
+}
+
+func (s *SourceStore) LatestJob(ctx context.Context, connectionID string) (*source.SyncJob, error) {
+	job, err := scanSyncJob(s.db.QueryRowContext(ctx, `SELECT `+syncJobColumns+` FROM source_sync_jobs
+		WHERE connection_id = ? ORDER BY started_at DESC LIMIT 1`, connectionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, source.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading latest sync job: %w", err)
+	}
+	return job, nil
 }
 
 func parseOptionalTime(value sql.NullString) *time.Time {
