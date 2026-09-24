@@ -93,3 +93,11 @@ func BuildPriceTable(cfg config.LLMConfig) llm.PriceTable {
 		USDToDisplay:    rate,
 	}
 }
+
+// Providers builds the LLM router and embedder for this App's config. All
+// server and CLI paths use it so provider wiring (keys, egress policy) is
+// identical everywhere.
+func (a *App) Providers() (*llm.Router, llm.Embedder) {
+	secrets, _ := a.Secrets()
+	return BuildRouter(a.Config.LLM, secrets, a.Config.Privacy), BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
+}

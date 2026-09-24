@@ -29,9 +29,7 @@ func (a *App) Handler() (http.Handler, error) {
 	// still serves fine as long as providers resolve their key via
 	// api_key_env (the default). BuildRouter/BuildEmbedder tolerate a nil
 	// store.
-	secrets, _ := a.Secrets()
-
-	router := BuildRouter(a.Config.LLM, secrets, a.Config.Privacy)
+	router, embedder := a.Providers()
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	chat := usecase.NewChatUseCase(router, prices, traces)
@@ -41,7 +39,6 @@ func (a *App) Handler() (http.Handler, error) {
 		return nil, fmt.Errorf("loading tokenizer: %w", err)
 	}
 	knowledgeStore := sqlite.NewKnowledgeStore(a.DB)
-	embedder := BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
 	ingest := usecase.NewIngestUseCase(knowledgeStore, extractor.NewDefaultRegistry(), tok, embedder, prices, traces)
 
 	// Hybrid Search: vecmem (embedded brute-force cosine) + FTS5 trigram,

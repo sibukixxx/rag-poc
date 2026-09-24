@@ -45,12 +45,11 @@ func (a *App) Datasets() eval.Store {
 // pipeline `POST /api/v1/knowledge-bases/:id/documents` uses — for
 // `forgeai ingest`.
 func (a *App) Ingest() (*usecase.IngestUseCase, error) {
-	secrets, _ := a.Secrets()
 	tok, err := tokenizer.New()
 	if err != nil {
 		return nil, fmt.Errorf("loading tokenizer: %w", err)
 	}
-	embedder := BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
+	_, embedder := a.Providers()
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
 	return usecase.NewIngestUseCase(a.Knowledge(), extractor.NewDefaultRegistry(), tok, embedder, prices, traces), nil
@@ -61,11 +60,9 @@ func (a *App) Ingest() (*usecase.IngestUseCase, error) {
 // a real query goes through, so a run's metrics reflect production
 // retrieval behavior exactly.
 func (a *App) Evaluation() (eval.Store, *usecase.EvaluationUseCase, error) {
-	secrets, _ := a.Secrets()
-	router := BuildRouter(a.Config.LLM, secrets, a.Config.Privacy)
+	router, embedder := a.Providers()
 	prices := BuildPriceTable(a.Config.LLM)
 	traces := sqlite.NewTraceStore(a.DB)
-	embedder := BuildEmbedder(a.Config.Embedding, secrets, a.Config.Privacy)
 
 	vectorSearcher := vecmem.New(a.DB)
 	keywordSearcher := sqlite.NewFTSStore(a.DB)
