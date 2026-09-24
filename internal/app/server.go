@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/sibukixxx/rag-poc/internal/adapter/extractor"
-	"github.com/sibukixxx/rag-poc/internal/config"
 	"github.com/sibukixxx/rag-poc/internal/adapter/llmrerank"
 	"github.com/sibukixxx/rag-poc/internal/adapter/sqlite"
 	"github.com/sibukixxx/rag-poc/internal/adapter/tokenizer"
 	"github.com/sibukixxx/rag-poc/internal/adapter/vecmem"
+	"github.com/sibukixxx/rag-poc/internal/config"
 	forgehttp "github.com/sibukixxx/rag-poc/internal/http"
 	forgehandler "github.com/sibukixxx/rag-poc/internal/http/handler"
 	"github.com/sibukixxx/rag-poc/internal/usecase"
