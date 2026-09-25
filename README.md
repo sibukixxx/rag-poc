@@ -14,6 +14,38 @@ ForgeAI provides end-to-end knowledge management: ingest documents, run semantic
 - 🚀 Deploy chat APIs — secure, rate-limited endpoints for your applications
 - 🔐 Encrypted secret storage — AES-GCM with per-secret authentication
 
+
+<!-- role-boundary:v1 -->
+## Role and boundaries
+
+**Role:** self-hosted RAG application lifecycleを、ingestion・retrieval・evaluation・trace・servingまで一つの再現可能なsystemとして検証する **RAG platform / evidence producer**。
+
+### Owns
+
+- document ingestion and retrieval runtime
+- hybrid search and RAG application behavior
+- golden-dataset evaluation
+- retrieval/generation quality metrics, traces, latency and cost evidence
+- self-hosted runtime/API surface
+
+### Does not own
+
+- customer-specific consulting recommendation or pricing
+- generic cross-domain Research semantics
+- company-wide CRM/work management
+- an external system's privileged action authority
+
+### Integration
+
+```text
+Documents / queries
+        ↓
+     ForgeAI
+        ↓ evaluation / trace artifact
+human / research / private decision consumer
+```
+
+Evaluation output should remain reproducible evidence. A downstream consumer may form a recommendation from it, but this repository should not encode customer-specific commercial policy into the public platform.
 ## Documentation
 
 - [docs/USER_MANUAL_JA.md](docs/USER_MANUAL_JA.md) — 日本語の導入・画面操作・評価・運用マニュアル
