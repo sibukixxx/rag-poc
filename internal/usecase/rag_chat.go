@@ -86,9 +86,25 @@ type RAGStreamResult struct {
 
 // ChatStream retrieves context for question, then streams an answer that
 // cites it. rerank controls whether the retrieval step's optional LLM
-// rerank runs (off by default per docs/ROADMAP.md W5).
+// rerank runs (off by default per docs/ROADMAP.md W5). Management chat
+// intentionally resolves the current active prompt on every request.
 func (u *RAGChatUseCase) ChatStream(ctx context.Context, knowledgeBaseID, alias, question string, rerank bool) (*RAGStreamResult, error) {
-	results, err := u.Search.Search(ctx, knowledgeBaseID, question, retrieval.Options{TopK: defaultRAGTopK, Rerank: rerank})
+	return u.ChatStreamConfigured(ctx, knowledgeBaseID, alias, question, defaultRAGTopK, rerank, u.systemPrompt(ctx))
+}
+
+// ChatStreamConfigured is the W10 runtime entry point. Unlike ChatStream,
+// every behavior-affecting value is supplied explicitly so an immutable
+// Deployment can keep serving the exact prompt/retrieval configuration it
+// snapshotted even after the management-side active prompt changes.
+func (u *RAGChatUseCase) ChatStreamConfigured(ctx context.Context, knowledgeBaseID, alias, question string, topK int, rerank bool, systemPrompt string) (*RAGStreamResult, error) {
+	if topK <= 0 {
+		topK = defaultRAGTopK
+	}
+	if systemPrompt == "" {
+		systemPrompt = DefaultRAGSystemPrompt
+	}
+
+	results, err := u.Search.Search(ctx, knowledgeBaseID, question, retrieval.Options{TopK: topK, Rerank: rerank})
 	if err != nil {
 		return nil, fmt.Errorf("retrieving context: %w", err)
 	}
@@ -101,7 +117,7 @@ func (u *RAGChatUseCase) ChatStream(ctx context.Context, knowledgeBaseID, alias,
 	}
 
 	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: u.systemPrompt(ctx)},
+		{Role: llm.RoleSystem, Content: systemPrompt},
 		{Role: llm.RoleUser, Content: buildRAGUserMessage(contextText, question)},
 	}
 
